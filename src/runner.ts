@@ -12,6 +12,7 @@ import './tools/index.js'; // side-effect: register all tools
 import { loadConfig } from './config.js';
 import { computeHealthScore } from './health-score.js';
 import { evaluatePolicy } from './policy.js';
+import { computeCacheKey, loadCachedResults, saveCachedResults } from './cache.js';
 import type {
   AuditReport,
   GoodjobConfig,
@@ -40,6 +41,8 @@ export interface RunOptions {
   skipTools?: string[];
   /** Include raw tool output */
   verbose?: boolean;
+  /** Disable result caching */
+  noCache?: boolean;
   /** Timeout per tool in ms (default: 120_000) */
   toolTimeoutMs?: number;
   /** Called before each tool starts */
@@ -80,6 +83,25 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
     }
     return true;
   });
+
+  // Check cache
+  const noCache = overrides.noCache ?? false;
+  const toolNames = filtered.map((t) => t.name);
+  let cacheKey = '';
+  if (!noCache) {
+    cacheKey = computeCacheKey(opts.projectPath, toolNames);
+    const cached = loadCachedResults(opts.projectPath, cacheKey);
+    if (cached) {
+      const toolsRecord: Record<string, ToolResult> = {};
+      for (const tool of filtered) {
+        if (cached[tool.name]) {
+          toolsRecord[tool.name] = cached[tool.name];
+          overrides.onToolComplete?.(tool.name, cached[tool.name].label, 'success', 0, cached[tool.name].issues.length);
+        }
+      }
+      return buildReport(toolsRecord, opts, config, Date.now() - startAll);
+    }
+  }
 
   // Run all tools in parallel
   const tasks = filtered.map(async (tool) => {
@@ -141,16 +163,43 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
   });
 
   const settled = await Promise.allSettled(tasks);
-  const results: Array<{ name: string; result: ToolResult }> = [];
+  const rawResults: Array<{ name: string; result: ToolResult }> = [];
   for (const s of settled) {
     if (s.status === 'fulfilled' && s.value) {
-      results.push(s.value);
+      rawResults.push(s.value);
     }
   }
 
+  const toolsRecord: Record<string, ToolResult> = {};
+  for (const { name, result } of rawResults) {
+    toolsRecord[name] = result;
+  }
+
+  // Build full report (includes health score + policy)
+  const report = buildReport(toolsRecord, opts, config, Date.now() - startAll);
+
+  // Save cache (exclude meta-tools like policy)
+  if (!noCache && cacheKey) {
+    const cacheable: Record<string, ToolResult> = {};
+    for (const [name, result] of Object.entries(toolsRecord)) {
+      if (name !== 'policy') cacheable[name] = result;
+    }
+    saveCachedResults(opts.projectPath, cacheKey, cacheable, GOODJOB_VERSION);
+  }
+
+  return report;
+}
+
+/** Build a full AuditReport from tool results, adding health score + policy */
+function buildReport(
+  toolsRecord: Record<string, ToolResult>,
+  opts: RunOptions & { projectPath: string },
+  config: GoodjobConfig,
+  durationMs: number,
+): AuditReport {
   // Collect all issues
   const allIssues: Issue[] = [];
-  for (const { result } of results) {
+  for (const result of Object.values(toolsRecord)) {
     allIssues.push(...result.issues);
   }
 
@@ -181,36 +230,24 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
     // ignore
   }
 
-  const toolsRecord: Record<string, ToolResult> = {};
-  for (const { name, result } of results) {
-    toolsRecord[name] = result;
-  }
-
   const report: AuditReport = {
-    summary: {
-      total: allIssues.length,
-      errors,
-      warnings,
-      info,
-      bySeverity,
-      byCategory,
-    },
+    summary: { total: allIssues.length, errors, warnings, info, bySeverity, byCategory },
     tools: toolsRecord,
     metadata: {
       projectName,
       projectPath: opts.projectPath,
       timestamp: new Date().toISOString(),
-      durationMs: Date.now() - startAll,
+      durationMs,
       nodeVersion: process.versions.node,
       npmVersion: getNpmVersion(),
       goodjobVersion: GOODJOB_VERSION,
     },
   };
 
-  // Compute health score from the full report
+  // Compute health score
   report.healthScore = computeHealthScore(report, config);
 
-  // Evaluate policy rules from config
+  // Evaluate policy rules
   const policyViolations = evaluatePolicy(report, config.policy);
   if (policyViolations.length > 0) {
     const policyIssues: Issue[] = policyViolations.map((v) => ({
@@ -222,7 +259,6 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
       detail: `Policy rule: "${v.rule.rule}" — field "${v.field}" actual ${v.actual}, expected ${v.operator} ${v.threshold}`,
     }));
 
-    // Recompute summary counts
     for (const iss of policyIssues) {
       allIssues.push(iss);
       report.summary.bySeverity[iss.severity] = (report.summary.bySeverity[iss.severity] ?? 0) + 1;
@@ -233,7 +269,6 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
     }
     report.summary.total = allIssues.length;
 
-    // Add meta-tool result for policy
     report.tools['policy'] = {
       tool: 'policy',
       label: 'Policy',

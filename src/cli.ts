@@ -15,6 +15,7 @@ import { storeBaseline, loadBaseline, computeDiff, formatDiff, baselineSummary }
 import { formatSbomOutput } from './sbom.js';
 import { postPrComment, formatPrComment } from './pr-comment.js';
 import { runTui } from './tui.js';
+import { runFix, formatFixOutput } from './fix.js';
 
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -406,6 +407,8 @@ export async function runCLI(): Promise<void> {
     .option('--sbom', 'Output SPDX 2.3 SBOM (Bill of Materials)')
     .option('--sbom-output <file>', 'Write SPDX 2.3 SBOM to a file')
     .option('-v, --verbose', 'Include raw tool output in report')
+    .option('--no-cache', 'Disable result caching (slower but always fresh)')
+    .option('--fix', 'Auto-fix fixable issues (npm audit fix, npm update outdated)')
     .option('--timeout <ms>', 'Per-tool timeout in milliseconds', '120000')
     .parse(process.argv);
 
@@ -417,6 +420,7 @@ export async function runCLI(): Promise<void> {
     tools: opts.tools,
     skipTools: opts.skip,
     verbose: opts.verbose ?? false,
+    noCache: opts.cache === false,
     toolTimeoutMs: parseInt(opts.timeout, 10) || 120_000,
     onToolStart(_name, label) {
       console.error(`  ${BOLD}${label}${RESET} ${DIM}...${RESET}`);
@@ -465,6 +469,11 @@ export async function runCLI(): Promise<void> {
     }
   } else {
     consoleReporter.write(report);
+  }
+
+  // Auto-fix if requested
+  if (opts.fix) {
+    process.stderr.write(formatFixOutput(runFix(projectPath)));
   }
 
   // Exit code: error-level issues → exit 1
