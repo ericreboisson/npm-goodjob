@@ -115,6 +115,7 @@ function mergeConfig(defaults: GoodjobConfig, overrides: Partial<GoodjobConfig>)
       excludePaths: overrides.secretScanning?.excludePaths ?? defaults.secretScanning?.excludePaths,
       extraPatterns: overrides.secretScanning?.extraPatterns ?? defaults.secretScanning?.extraPatterns,
     },
+    projects: overrides.projects ?? defaults.projects,
   };
 }
 

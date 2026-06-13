@@ -16,6 +16,9 @@ import { formatSbomOutput } from './sbom.js';
 import { postPrComment, formatPrComment } from './pr-comment.js';
 import { runTui } from './tui.js';
 import { runFix, formatFixOutput } from './fix.js';
+import { loadProjects, runDashboard } from './dashboard.js';
+import { writeDashboardConsole } from './reporters/dashboard-console-reporter.js';
+import { writeDashboardHtmlFile } from './reporters/html-dashboard-reporter.js';
 
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -419,6 +422,49 @@ export async function runCLI(): Promise<void> {
       const posted = postPrComment(report);
       if (!posted) {
         process.stdout.write(formatPrComment(report) + '\n');
+      }
+    });
+
+  // -----------------------------------------------------------------------
+  // Subcommand: dashboard — multi-project overview
+  // -----------------------------------------------------------------------
+  program
+    .command('dashboard')
+    .description('Multi-project dashboard for architect oversight')
+    .option('--html-output <file>', 'Write HTML dashboard to a file')
+    .option('--timeout <ms>', 'Per-project tool timeout in milliseconds', '180000')
+    .action(async (options) => {
+      const cwd = process.cwd();
+      const { loadConfig } = await import('./config.js');
+      const config = loadConfig(cwd);
+      const projects = loadProjects(config, cwd);
+
+      if (projects.length === 0) {
+        console.error(`\n  ${FG_YELLOW}No projects configured.${RESET}`);
+        console.error(`  Add a "projects" array to your ${BOLD}.goodjobrc${RESET}:`);
+        console.error(`    {
+        "projects": [
+          { "name": "My App", "path": "../relative/or/absolute/path" }
+        ]
+      }`);
+        console.error('');
+        process.exit(1);
+        return;
+      }
+
+      const dr = await runDashboard(projects, {
+        toolTimeoutMs: parseInt(options.timeout, 10) || 180_000,
+      });
+
+      if (options.htmlOutput) {
+        await writeDashboardHtmlFile(dr, resolve(process.cwd(), options.htmlOutput));
+        console.error(`\n\u{1F4CA} Dashboard written to: ${options.htmlOutput}\n`);
+      } else {
+        writeDashboardConsole(dr);
+      }
+
+      if (dr.summary.failed > 0) {
+        process.exit(1);
       }
     });
 

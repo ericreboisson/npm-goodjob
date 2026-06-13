@@ -19,7 +19,8 @@ npx npm-goodjob . --html-output audit.html
 | Capability | Description |
 |---|---|
 | **11 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, OSV-Scanner, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning |
-| **4 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0 |
+| **5 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML** |
+| **Multi-project dashboard** | Architect oversight — run audits across all projects in one shot |
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
 | **Policy as Code** | Expression-based rules (`severity.critical > 0`) with error/warning levels |
 | **SBOM (SPDX 2.3)** | Software Bill of Materials with PURLs, licenses — CRA compliant |
@@ -130,6 +131,7 @@ npx npm-goodjob .
 | `pre-commit install` | Install git pre-commit hook (secret-scanning + lockfile) |
 | `pre-commit` | Run pre-commit checks manually |
 | `pr-comment [path]` | Generate + post PR comment to GitHub/GitLab |
+| `dashboard [options]` | Multi-project dashboard — run audits across all configured projects |
 | `tui [path]` | Interactive terminal UI (arrow keys, Enter for details) |
 
 ---
@@ -276,6 +278,61 @@ Diff output shows:
 - **Severity changes**: `4 → 5 critical (▲ +1)`
 - **Tool changes**: new tools, tool errors, issue counts
 - **New issues**: first occurrence since baseline
+
+---
+
+## Multi-Project Dashboard
+
+Oversee quality across all your projects at once — run audits on every configured project and get a unified view.
+
+```bash
+npx npm-goodjob dashboard
+```
+
+### Configuration
+
+Add a `projects` array to your `.goodjobrc`:
+
+```json
+{
+  "projects": [
+    { "name": "App Front Office", "path": "../angular-sandbox" },
+    { "name": "Back Office",      "path": "../react-backoffice" },
+    { "name": "Auth Service",     "path": "/absolute/path/to/auth" }
+  ]
+}
+```
+
+Relative paths are resolved from the `.goodjobrc` location.
+
+### Output
+
+**Console** — table with project name, health score, issue count, and status:
+
+```
+┌──────────────────┬───────┬────────┬──────────┐
+│ Project          │ Health│ Issues │ Status   │
+├──────────────────┼───────┼────────┼──────────┤
+│ Auth Service     │ 12/20 │   47   │ ⚠ 5 err  │
+│ App Front Office │ 16/20 │   23   │ ✓ OK     │
+│ Back Office      │ 18/20 │    5   │ ✓ OK     │
+└──────────────────┴───────┴────────┴──────────┘
+```
+
+Sorted by worst health first. Failed projects (no `package.json`, audit crash) shown at the top with `✗ ERROR`.
+
+**HTML** — responsive dashboard with project cards, health circles, severity bars, and collapsible drill-down per project:
+
+```bash
+npx npm-goodjob dashboard --html-output dashboard.html
+```
+
+### Options
+
+| Flag | Description |
+|---|---|
+| `--html-output <file>` | Write HTML dashboard to file |
+| `--timeout <ms>` | Per-project tool timeout (default: 180000) |
 
 ---
 

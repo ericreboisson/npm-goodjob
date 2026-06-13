@@ -16,8 +16,13 @@ export type {
   ToolOptions,
   ToolResult,
   ToolRunner,
-  ToolStatus,
   Reporter,
+  DashboardReport,
+  DashboardProject,
+  DashboardProjectEntry,
+  PolicyRule,
+  PolicyConfig,
+  PolicyViolation,
 } from './types.js';
 
 export { loadConfig, getDefaultConfig, clearConfigCache } from './config.js';

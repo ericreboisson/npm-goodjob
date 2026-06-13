@@ -153,6 +153,49 @@ export interface PolicyViolation {
   description: string;
 }
 
+/** A single project entry in the multi-project dashboard */
+export interface DashboardProject {
+  /** Display name (e.g. "App Front Office") */
+  name: string;
+  /** Absolute or relative path to the project directory */
+  path: string;
+}
+
+/** Per-project entry in a dashboard report */
+export interface DashboardProjectEntry {
+  /** Display name */
+  name: string;
+  /** Resolved absolute path */
+  path: string;
+  /** Audit result (undefined if tool errored) */
+  report?: AuditReport;
+  /** Execution duration in ms */
+  durationMs: number;
+  /** Whether the audit completed successfully */
+  status: 'success' | 'error';
+  /** Error message if status === 'error' */
+  error?: string;
+}
+
+/** Aggregated multi-project dashboard report */
+export interface DashboardReport {
+  /** Per-project audit results */
+  projects: DashboardProjectEntry[];
+  /** Total wall-clock duration in ms */
+  totalDurationMs: number;
+  /** ISO timestamp */
+  timestamp: string;
+  /** Aggregated summary across all projects */
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    errors: number;
+    warnings: number;
+    info: number;
+  };
+}
+
 /** User-facing config from .goodjobrc */
 export interface GoodjobConfig {
   policy?: PolicyConfig;
@@ -185,6 +228,8 @@ export interface GoodjobConfig {
       severity: 'critical' | 'high' | 'medium';
     }>;
   };
+  /** Multi-project dashboard config */
+  projects?: DashboardProject[];
 }
 
 /** Options passed to every tool runner */
