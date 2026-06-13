@@ -14,6 +14,7 @@ import {
   skippedResult,
   errorResult,
   getInstalledPackageVersion,
+  ensureLockfile,
 } from './base.js';
 
 /** Shape of `npm audit --json` output (simplified — we only care about
@@ -74,14 +75,37 @@ export const npmAuditRunner: ToolRunner = {
 
   async run(options: ToolOptions): Promise<ToolResult> {
     const start = Date.now();
-    const lockfilePath = resolve(options.projectPath, 'package-lock.json');
+    const projectPath = options.projectPath;
+    const lockfilePath = resolve(projectPath, 'package-lock.json');
+    const pkgJsonPath = resolve(projectPath, 'package.json');
 
-    if (!existsSync(lockfilePath) && !existsSync(resolve(options.projectPath, 'package.json'))) {
+    if (!existsSync(pkgJsonPath)) {
       return skippedResult(
         'npm-audit',
         'npm audit',
-        'No package.json or package-lock.json found',
+        'No package.json found',
       );
+    }
+
+    if (!existsSync(lockfilePath)) {
+      if (!ensureLockfile(projectPath)) {
+        return buildResult(
+          'npm-audit',
+          'npm audit',
+          npmVersion(),
+          [
+            {
+              level: 'warning',
+              tool: 'npm-audit',
+              category: 'configuration',
+              severity: 'low',
+              message: 'No lockfile found — could not generate one with npm install --package-lock-only',
+              detail: 'Try running "npm install" manually in the cloned project before auditing.',
+            },
+          ],
+          Date.now() - start,
+        );
+      }
     }
 
     // Run `npm audit --json`

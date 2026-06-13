@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c)](https://github.com/ericreboisson/npm-goodjob/network/updates)
 
-**Unified npm project audit aggregator** — run 11 audit tools with one command, get one report with health score, policy enforcement, SBOM, SARIF, baseline diff, and interactive TUI.
+**Unified npm project audit aggregator** — run 15 audit tools with one command, get one report with health score, policy enforcement, SBOM, SARIF, baseline diff, web dashboard, and interactive TUI.
 
 ```bash
 npx npm-goodjob . --html-output audit.html
@@ -18,8 +18,8 @@ npx npm-goodjob . --html-output audit.html
 
 | Capability | Description |
 |---|---|
-| **11 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, OSV-Scanner, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning |
-| **5 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML** |
+| **15 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, OSV-Scanner, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures** |
+| **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
 | **Multi-project dashboard** | Architect oversight — run audits across all projects in one shot |
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
 | **Policy as Code** | Expression-based rules (`severity.critical > 0`) with error/warning levels |
@@ -86,10 +86,14 @@ npx npm-goodjob .
 |---|---|---|---|---|
 | npm audit | `npm-audit` | Security | `npm` available | `npm audit --json` |
 | npm outdated | `npm-outdated` | Dependencies | `npm` available | `npm outdated --json` |
+| npm audit signatures | `npm-signatures` | Security | `npm` + lockfile | `npm audit signatures --json` |
+| Snyk | `snyk` | Security | `snyk` in PATH or npx | `snyk test --json` |
+| Socket.dev | `socket` | Security | `socket` in PATH or npx | npx @socketsecurity/cli scan --json |
+| AuditJS | `auditjs` | Security | `auditjs` in PATH or npx | `auditjs ossi --json` |
 | depcheck | `depcheck` | Dependencies | `depcheck` in node_modules | npx --yes depcheck |
 | ts-prune | `ts-prune` | Dead code | `ts-prune` in PATH + tsconfig.json | npx ts-prune |
 | ESLint | `eslint` | Code quality | `eslint` in PATH + config file | npx eslint |
-| OSV-Scanner | `osv-scanner` | Security | `osv-scanner` in PATH | osv-scanner |
+| OSV-Scanner | `osv-scanner` | Security | `osv-scanner` in PATH or npx | osv-scanner / npx @google/osv-scanner |
 | dependency-cruiser | `depcruise` | Architecture | `depcruise` in PATH | npx depcruise |
 | dependency-check | `dependency-check` | Configuration | Always (built-in) | Internal |
 | license-check | `license-check` | License | Always (built-in) | Internal |
@@ -132,6 +136,7 @@ npx npm-goodjob .
 | `pre-commit` | Run pre-commit checks manually |
 | `pr-comment [path]` | Generate + post PR comment to GitHub/GitLab |
 | `dashboard [options]` | Multi-project dashboard — run audits across all configured projects |
+| `serve [options]` | Start web dashboard server with live audit and history timeline |
 | `tui [path]` | Interactive terminal UI (arrow keys, Enter for details) |
 
 ---
@@ -188,7 +193,7 @@ Composite /20 score calculated from four dimensions (5 points each):
 
 | Dimension | Default weight | Sources |
 |---|---|---|
-| Security | /5 | npm audit, OSV-Scanner, secret-scanning |
+| Security | /5 | npm audit, OSV-Scanner, secret-scanning, Snyk, Socket.dev, AuditJS, npm-signatures |
 | Dependencies | /5 | npm outdated, depcheck, lockfile-analysis |
 | Code quality | /5 | ESLint, ts-prune, dependency-cruiser |
 | Project health | /5 | dependency-check, license-check, config validation |
@@ -333,6 +338,49 @@ npx npm-goodjob dashboard --html-output dashboard.html
 |---|---|
 | `--html-output <file>` | Write HTML dashboard to file |
 | `--timeout <ms>` | Per-project tool timeout (default: 180000) |
+
+---
+
+## Web Dashboard Server
+
+Start a persistent web dashboard with audit history timeline, health gauge, multi-project overview, and auto-refresh:
+
+```bash
+npx npm-goodjob serve --port 3333 --open
+```
+
+The dashboard server:
+- Runs the full audit on startup and stores results in `.goodjob-data/history/`
+- Shows a **health gauge** (circular Chart.js doughnut) with current score
+- **Timeline chart** — health score trend over time (last 50 runs)
+- **Run history table** — click "Run Audit" to trigger a new audit on demand
+- **Multi-project view** — when configured with the `projects` array in `.goodjob-data/`, shows all projects
+- **Auto-refresh** every 30 seconds
+- **Export PDF** — built-in browser `window.print()` support
+- REST API at `/api/status`, `/api/history`, `/api/run`, `/api/dashboard`
+
+### API endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/status` | GET | Server info, version, configured projects |
+| `/api/history` | GET | All past audit runs (lightweight index) |
+| `/api/run` | POST | Trigger a new audit, save to history |
+| `/api/dashboard` | GET | Current dashboard state with projects |
+| `/api/history/:id` | GET | Full audit report for a specific run |
+
+### Options
+
+| Flag | Description |
+|---|---|
+| `--port <number>` | Server port (default: 3333) |
+| `--open` | Open browser automatically |
+
+### History storage
+
+Audit runs are stored in `.goodjob-data/`:
+- `history-idx.json` — lightweight index of all runs (timestamps, health score, counts)
+- `runs/{id}.json` — full `AuditReport` per run (max 100 kept)
 
 ---
 
@@ -655,7 +703,13 @@ Your tool is now auto-discovered by `runAudit()` and appears in all output forma
 | CI templates | | | | ✓ |
 | Offline / no phone-home | ✓ | | | ✓ |
 | Open source | | | | ✓ MIT |
-| **Single command** | ✓ | ✓ | ✓ | ✓ (11 tools) |
+| **Snyk integration** | | ✓ | | ✓ |
+| **Socket.dev integration** | | | ✓ | ✓ |
+| **AuditJS / OSS Index** | | | | ✓ |
+| **npm audit signatures** | ✓ | | | ✓ |
+| **Web dashboard server** | | | | ✓ |
+| **Audit history** | | | | ✓ |
+| **Single command** | ✓ | ✓ | ✓ | ✓ (15 tools) |
 
 ---
 
@@ -675,7 +729,7 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 - **Node.js >= 20**
 - npm (for audit tools)
-- Optional tools (depcheck, eslint, ts-prune, osv-scanner, depcruise) — auto-skipped if missing
+- Optional tools (depcheck, eslint, ts-prune, osv-scanner, depcruise, snyk, socket, auditjs) — auto-skipped if missing, fall back to npx when possible
 
 ---
 
@@ -687,8 +741,11 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 | `npx depcheck` | `npx npm-goodjob . --tools depcheck` |
 | `npx ts-prune` | `npx npm-goodjob . --tools ts-prune` |
 | `npx eslint .` | `npx npm-goodjob . --tools eslint` |
-| `snyk test` | `npx npm-goodjob .` (includes OSV-Scanner) |
-| `socket.dev` | `npx npm-goodjob . --sarif-output report.sarif` |
+| `snyk test` | `npx npm-goodjob .` (includes Snyk runner) |
+| `socket.dev scan` | `npx npm-goodjob .` (includes Socket.dev runner) |
+| `auditjs ossi` | `npx npm-goodjob .` (includes AuditJS runner) |
+| `npm audit signatures` | `npx npm-goodjob .` (includes npm-signatures runner) |
+| Web dashboard | `npx npm-goodjob serve --open` |
 | All combined | `npx npm-goodjob . --html-output report.html --sarif --sbom` |
 
 ---
@@ -697,9 +754,9 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 | Project size | Tools run | Typical time |
 |---|---|---|
-| Small (< 50 deps) | All 11 | 2-5s |
-| Medium (50-200 deps) | All 11 | 5-15s |
-| Large (200+ deps) | All 11 | 10-30s |
+| Small (< 50 deps) | All 15 | 2-8s |
+| Medium (50-200 deps) | All 15 | 5-20s |
+| Large (200+ deps) | All 15 | 10-40s |
 
 Timeouts: per-tool timeout is 120s by default. Use `--timeout 300000` for very large projects. npm audit can be slow on slow networks — tools run in parallel so total time = slowest single tool.
 

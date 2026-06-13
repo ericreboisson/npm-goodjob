@@ -12,6 +12,7 @@ import {
   buildResult,
   skippedResult,
   readPackageJson,
+  ensureLockfile,
 } from './base.js';
 
 interface NpmOutdatedRow {
@@ -36,10 +37,20 @@ export const npmOutdatedRunner: ToolRunner = {
 
   async run(options: ToolOptions): Promise<ToolResult> {
     const start = Date.now();
-    const pkg = readPackageJson(options.projectPath);
+    const projectPath = options.projectPath;
+    const pkg = readPackageJson(projectPath);
 
     if (!pkg.dependencies && !pkg.devDependencies) {
       return skippedResult('npm-outdated', 'npm outdated', 'No dependencies found');
+    }
+
+    // Generate lockfile if missing (required by npm outdated in newer npm versions)
+    if (!existsSync(resolve(projectPath, 'package-lock.json'))) {
+      ensureLockfile(projectPath);
+    }
+
+    if (!existsSync(resolve(projectPath, 'node_modules'))) {
+      return skippedResult('npm-outdated', 'npm outdated', 'node_modules not found — run npm install first');
     }
 
     const result = await runToolCommand('npm', ['outdated', '--json', '--long'], options);
@@ -63,8 +74,21 @@ export const npmOutdatedRunner: ToolRunner = {
 
     const issues: Issue[] = [];
     for (const [pkgName, row] of Object.entries(parsed)) {
-      const majorGap = semverMajorDiff(row.current ?? '0.0.0', row.latest);
+      if (!row.current) {
+        // Package not installed — skip misleading version gap
+        issues.push({
+          level: 'info',
+          tool: 'npm-outdated',
+          category: 'outdated-dependency',
+          severity: 'low',
+          message: `${pkgName}: not installed — wanted ${row.wanted}, latest ${row.latest}`,
+          detail: `Type: ${row.type}${row.homepage ? ` | ${row.homepage}` : ''}`,
+          package: pkgName,
+        });
+        continue;
+      }
 
+      const majorGap = semverMajorDiff(row.current, row.latest);
       if (majorGap === null) continue;
 
       issues.push({
@@ -72,7 +96,7 @@ export const npmOutdatedRunner: ToolRunner = {
         tool: 'npm-outdated',
         category: 'outdated-dependency',
         severity: majorGap >= 2 ? 'medium' : majorGap >= 1 ? 'low' : 'low',
-        message: `${pkgName}: ${row.current ?? 'not installed'} → latest ${row.latest}`,
+        message: `${pkgName}: ${row.current} → latest ${row.latest}`,
         detail: `Wanted: ${row.wanted} | Type: ${row.type}${row.homepage ? ` | ${row.homepage}` : ''}`,
         package: pkgName,
         version: row.current,

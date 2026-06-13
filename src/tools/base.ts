@@ -127,7 +127,7 @@ export async function runNpxToolCommand(
   tool: string,
   args: string[],
   options: ToolOptions,
-): Promise<{ stdout: string; stderr: string } | null> {
+): Promise<CommandResult | null> {
   return runToolCommand('npx', ['--yes', tool, ...args], options);
 }
 
@@ -147,26 +147,34 @@ export function getBinaryVersion(name: string, cwd: string): string {
   }
 }
 
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  /** Exit code of the child process. undefined when unavailable. */
+  exitCode?: number;
+}
+
 /**
- * Safely run a child process. Returns null on failure.
+ * Safely run a child process. Returns null on catastrophic failure
+ * (e.g. binary not found, OS error).
  */
 export async function runToolCommand(
   bin: string,
   args: string[],
   options: ToolOptions,
-): Promise<{ stdout: string; stderr: string } | null> {
+): Promise<CommandResult | null> {
   try {
     const { stdout, stderr } = await execFileAsync(bin, args, {
       cwd: options.projectPath,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
-    return { stdout, stderr };
+    return { stdout, stderr, exitCode: 0 };
   } catch (err: unknown) {
-    // child_process errors have stdout/stderr even on non-zero exit
+    // child_process errors have stdout/stderr and code even on non-zero exit
     if (err && typeof err === 'object' && 'stdout' in err) {
-      const e = err as { stdout: string; stderr: string };
-      return { stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+      const e = err as { stdout: string; stderr: string; code?: number };
+      return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: e.code ?? 1 };
     }
     return null;
   }
@@ -205,6 +213,34 @@ export function buildResult(
     issues,
     ...(errorMessage ? { errorMessage } : {}),
   };
+}
+
+/**
+ * Ensure a package-lock.json exists in the project directory.
+ * If missing, tries to generate one via `npm install --package-lock-only`.
+ * Retries with `--legacy-peer-deps` for older projects (e.g. Angular < 18).
+ * Returns true if lockfile exists after the attempt.
+ */
+export function ensureLockfile(projectPath: string): boolean {
+  const lockfilePath = resolve(projectPath, 'package-lock.json');
+  if (existsSync(lockfilePath)) return true;
+  if (!existsSync(resolve(projectPath, 'package.json'))) return false;
+
+  const baseArgs = [
+    'install', '--package-lock-only',
+    '--ignore-scripts', '--no-audit', '--no-fund',
+  ];
+  try {
+    execSync(`npm ${baseArgs.join(' ')}`, { cwd: projectPath, stdio: 'pipe', timeout: 60_000, encoding: 'utf-8' });
+    return existsSync(lockfilePath);
+  } catch {
+    try {
+      execSync(`npm ${baseArgs.join(' ')} --legacy-peer-deps`, { cwd: projectPath, stdio: 'pipe', timeout: 120_000, encoding: 'utf-8' });
+      return existsSync(lockfilePath);
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function errorResult(

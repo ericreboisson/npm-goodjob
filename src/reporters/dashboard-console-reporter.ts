@@ -44,7 +44,7 @@ export function writeDashboardConsole(report: DashboardReport): void {
 
   // Header
   const header = `  ${DIM}┌${'─'.repeat(nameWidth + 2)}┬───────┬────────┬──────────┐${RESET}`;
-  const hdrRow = `  ${sep} ${BOLD}Project${' '.repeat(nameWidth - 7)}${sep} ${BOLD}Health${sep} ${BOLD}Issues${sep} ${BOLD}Status   ${sep}`;
+  const hdrRow = `  ${sep} ${BOLD}Project${' '.repeat(nameWidth - 6)}${sep} ${BOLD}Health${sep} ${BOLD}Issues${sep} ${BOLD}Status   ${sep}`;
   const divider = `  ${DIM}├${'─'.repeat(nameWidth + 2)}┼───────┼────────┼──────────┤${RESET}`;
   const footer = `  ${DIM}└${'─'.repeat(nameWidth + 2)}┴───────┴────────┴──────────┘${RESET}`;
 

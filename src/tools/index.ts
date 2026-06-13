@@ -18,3 +18,7 @@ export { dependencySanityRunner } from './dependency-check.js';
 export { licenseCheckRunner } from './license-check.js';
 export { lockfileAnalysisRunner } from './lockfile-analysis.js';
 export { secretScanningRunner } from './secret-scanning.js';
+export { snykRunner } from './snyk.js';
+export { socketRunner } from './socket.js';
+export { auditJsRunner } from './auditjs.js';
+export { npmSignaturesRunner } from './npm-signatures.js';

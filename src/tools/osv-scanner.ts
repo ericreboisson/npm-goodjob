@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // npm-goodjob — OSV-Scanner runner
 // Scans lockfiles / manifest files against the OSV.dev vulnerability database.
-// Uses the `osv-scanner` CLI binary when available, otherwise skips.
+// Uses the `osv-scanner` CLI binary when installed locally (Go binary from
+// github.com/google/osv-scanner - NOT available on npm).
 // ---------------------------------------------------------------------------
 
 import { existsSync } from 'node:fs';
@@ -40,11 +41,10 @@ export const osvScannerRunner: ToolRunner = {
   label: 'OSV-Scanner',
 
   isAvailable(cwd: string): boolean {
-    // OSV-Scanner is a Go binary — check PATH and node_modules/.bin
-    return (
-      isBinaryAvailable('osv-scanner', cwd) ||
-      existsSync(resolve(cwd, 'node_modules', '.bin', 'osv-scanner'))
-    );
+    // OSV-Scanner is a Go binary (not on npm). Only available if installed
+    // via PATH (brew, go install, curl) or node_modules/.bin symlink.
+    return isBinaryAvailable('osv-scanner', cwd) ||
+      existsSync(resolve(cwd, 'node_modules', '.bin', 'osv-scanner'));
   },
 
   async run(options: ToolOptions): Promise<ToolResult> {
@@ -54,7 +54,7 @@ export const osvScannerRunner: ToolRunner = {
       return skippedResult(
         'osv-scanner',
         'OSV-Scanner',
-        'osv-scanner is not installed — see https://github.com/google/osv-scanner',
+        'osv-scanner binary not found in PATH — install via brew install osv-scanner, go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest, or download from https://github.com/google/osv-scanner/releases',
       );
     }
 
@@ -98,8 +98,22 @@ export const osvScannerRunner: ToolRunner = {
     }
 
     const stdout = result.stdout.trim();
+
+    // Check stderr for errors/warnings even when exit code was non-zero
+    const stderr = result.stderr.trim();
     if (!stdout) {
       const version = getBinaryVersion('osv-scanner', options.projectPath);
+      if (stderr) {
+        return {
+          tool: 'osv-scanner',
+          label: 'OSV-Scanner',
+          version,
+          status: 'error',
+          durationMs: Date.now() - start,
+          issues: [],
+          errorMessage: stderr.slice(0, 500),
+        };
+      }
       return buildResult('osv-scanner', 'OSV-Scanner', version, [], Date.now() - start);
     }
 
@@ -114,7 +128,9 @@ export const osvScannerRunner: ToolRunner = {
         status: 'error',
         durationMs: Date.now() - start,
         issues: [],
-        errorMessage: 'Failed to parse OSV-Scanner JSON output',
+        errorMessage: stderr
+          ? `Failed to parse OSV-Scanner JSON output: ${stderr.slice(0, 300)}`
+          : 'Failed to parse OSV-Scanner JSON output',
       };
     }
 

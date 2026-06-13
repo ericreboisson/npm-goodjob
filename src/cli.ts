@@ -2,11 +2,15 @@
 // npm-goodjob — CLI entry point
 // ---------------------------------------------------------------------------
 
+import { execSync } from 'node:child_process';
 import { Command } from 'commander';
 import { existsSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { getAllTools } from './tools/base.js';
+import './tools/index.js'; // side-effect: register all tools
 import { runAudit, GOODJOB_VERSION } from './runner.js';
+import { isGitUrl, cloneRepoAsync } from './git-clone.js';
 import { consoleReporter } from './reporters/console-reporter.js';
 import { jsonReporter, writeJsonFile } from './reporters/json-reporter.js';
 import { htmlReporter, writeHtmlFile } from './reporters/html-reporter.js';
@@ -26,6 +30,149 @@ const DIM = '\x1b[2m';
 const FG_GREEN = '\x1b[32m';
 const FG_YELLOW = '\x1b[33m';
 const FG_RED = '\x1b[31m';
+
+// ---------------------------------------------------------------------------
+// Live progress tracker for parallel tool execution
+// ---------------------------------------------------------------------------
+
+class ProgressTracker {
+  private running: Map<string, { label: string; startMs: number }> = new Map();
+  private completed = 0;
+  private skipped = 0;
+  private failed = 0;
+  private startTime = Date.now();
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  start(name: string, label: string): void {
+    this.running.set(name, { label, startMs: Date.now() });
+    this.scheduleRender();
+  }
+
+  complete(name: string, label: string, status: string, durationMs: number, issues: number): void {
+    this.running.delete(name);
+    if (status === 'success') this.completed++;
+    else if (status === 'skipped') this.skipped++;
+    else this.failed++;
+
+    // Clear progress line, print completion line
+    this.clearLine();
+    const elapsed = durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
+    const tag = status === 'success'
+      ? `${FG_GREEN}✓${RESET}`
+      : status === 'skipped'
+        ? `${DIM}–${RESET}`
+        : `${FG_RED}✗${RESET}`;
+    const countInfo = issues > 0 ? ` ${FG_YELLOW}(${issues})${RESET}` : '';
+    process.stderr.write(`  ${tag} ${BOLD}${label}${RESET} ${DIM}${elapsed}${RESET}${countInfo}\n`);
+
+    if (this.running.size === 0) {
+      this.stop();
+    } else {
+      this.render();
+    }
+  }
+
+  private scheduleRender(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.render(), 150);
+    if (typeof this.timer === 'object' && this.timer && 'unref' in this.timer) {
+      (this.timer as NodeJS.Timeout).unref();
+    }
+  }
+
+  private render(): void {
+    const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(1);
+    const done = this.completed + this.skipped + this.failed;
+    const total = done + this.running.size;
+    const spinner = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(Date.now() / 80) % 10];
+
+    // Show running tool labels inline (max 2)
+    const runningLabels = [...this.running.values()].map((r) => {
+      const s = ((Date.now() - r.startMs) / 1000).toFixed(1);
+      return `${r.label} ${s}s`;
+    });
+    const runningStr = runningLabels.length <= 3
+      ? runningLabels.join(', ')
+      : `${runningLabels[0]}, ${runningLabels[1]} +${runningLabels.length - 2} more`;
+
+    process.stderr.write(`\r\x1b[K  ${spinner} ${done}/${total} · ${elapsed}s  ${DIM}${runningStr}${RESET}`);
+  }
+
+  private stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    this.clearLine();
+  }
+
+  private clearLine(): void {
+    process.stderr.write('\r\x1b[K');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function resolveTargetPath(input?: string): Promise<string> {
+  const trimmed = (input ?? '.').trim();
+  if (isGitUrl(trimmed)) {
+    return cloneWithSpinner(trimmed);
+  }
+  return resolve(process.cwd(), trimmed);
+}
+
+async function resolveOutputFile(projectArg: string | undefined, fileArg: string): Promise<string> {
+  if (resolve(fileArg) === fileArg) return fileArg;
+  const base = projectArg && isGitUrl(projectArg) ? process.cwd() : await resolveTargetPath(projectArg ?? '.');
+  return resolve(base, fileArg);
+}
+
+/**
+ * Clone a git URL with a live spinner, install deps, return resolved path.
+ */
+async function cloneWithSpinner(url: string): Promise<string> {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const chars = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+  let frame = 0;
+  let progressLine = '';
+
+  timer = setInterval(() => {
+    const c = chars[frame % chars.length];
+    process.stderr.write(`\r\x1b[K  ${c} ${BOLD}Cloning${RESET} ${DIM}${url}${RESET}`);
+    if (progressLine) {
+      const extra = progressLine.length > 60 ? progressLine.slice(0, 57) + '...' : progressLine;
+      process.stderr.write(` ${DIM}${extra}${RESET}`);
+    }
+    frame++;
+  }, 100);
+
+  try {
+    const result = await cloneRepoAsync(url, (line) => { progressLine = line; });
+
+    if (timer) clearInterval(timer);
+    process.stderr.write(`\r\x1b[K  ${FG_GREEN}✓${RESET} ${BOLD}Cloned to${RESET} ${DIM}${result.path}${RESET}\n`);
+
+    const pkgDir = result.path;
+    if (existsSync(resolve(pkgDir, 'package.json')) && !existsSync(resolve(pkgDir, 'node_modules'))) {
+      const installer = existsSync(resolve(pkgDir, 'package-lock.json')) ? 'npm ci' : 'npm install';
+      process.stderr.write(`  ${BOLD}Installing dependencies${RESET} ${DIM}(${installer})${RESET}\n`);
+      try {
+        execSync(installer, { cwd: pkgDir, stdio: 'inherit', timeout: 300_000 });
+      } catch {
+        process.stderr.write(`  ${FG_YELLOW}⚠${RESET} Dependency install failed — some tools may skip${RESET}\n`);
+      }
+    }
+    return result.path;
+  } catch (err: unknown) {
+    if (timer) clearInterval(timer);
+    const msg = err instanceof Error ? err.message : 'Clone failed';
+    process.stderr.write(`\r\x1b[K  ${FG_RED}✗${RESET} ${BOLD}Clone failed${RESET} ${DIM}${msg}${RESET}\n`);
+    process.exit(1);
+    return '';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // CI workflow templates
@@ -190,6 +337,7 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
   const allTools = [
     { name: 'npm-audit', ok: true },
     { name: 'npm-outdated', ok: true },
+    { name: 'npm-signatures', ok: true },
     { name: 'secret-scanning', ok: true },
     { name: 'lockfile-analysis', ok: true },
     { name: 'license-check', ok: true },
@@ -197,6 +345,11 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
     { name: 'depcheck', ok: hasDepcheck },
     { name: 'eslint', ok: hasEslint },
     { name: 'ts-prune', ok: hasTypescript },
+    { name: 'osv-scanner', ok: false },
+    { name: 'depcruise', ok: hasDepcheck },
+    { name: 'snyk', ok: false },
+    { name: 'socket', ok: false },
+    { name: 'auditjs', ok: false },
   ];
   for (const t of allTools) {
     const icon = t.ok ? `${FG_GREEN}✓${RESET}` : `${DIM}–${RESET}`;
@@ -277,6 +430,59 @@ exit 0
 }
 
 // ---------------------------------------------------------------------------
+// npm-goodjob doctor — environment diagnostics
+// ---------------------------------------------------------------------------
+
+async function runDoctor(projectPath: string): Promise<void> {
+  const cwd = await resolveTargetPath(projectPath);
+  const tools = getAllTools();
+
+  const header = `${BOLD}${'Tool'.padEnd(28)}Available  Version${RESET}`;
+  const sep = `${'─'.repeat(28)}  ─────────  ──────────────────`;
+  const lines: string[] = [];
+
+  for (const tool of tools) {
+    let available: boolean;
+    try {
+      available = await tool.isAvailable(cwd);
+    } catch {
+      available = false;
+    }
+    let version = 'N/A';
+    if (available) {
+      const { getBinaryVersion } = await import('./tools/base.js');
+      try {
+        const v = getBinaryVersion(tool.name, cwd);
+        version = v !== 'N/A' ? v : 'via npx';
+      } catch {
+        version = 'available';
+      }
+    }
+    const icon = available ? `${FG_GREEN}✓${RESET}` : `${DIM}✗${RESET}`;
+    lines.push(`  ${tool.label.padEnd(26)} ${icon.padEnd(9)} ${DIM}${version}${RESET}`);
+  }
+
+  const nodeVer = process.versions.node;
+  const npmVer = execSync('npm --version', { encoding: 'utf-8' }).trim();
+
+  console.error(`\n  ${BOLD}npm-goodjob Doctor${RESET} ${DIM}v${GOODJOB_VERSION}${RESET}`);
+  console.error(`  ${DIM}${'─'.repeat(52)}${RESET}`);
+  console.error(`  ${BOLD}Environment${RESET}`);
+  console.error(`  ${DIM}Node.js:${RESET}  ${nodeVer}`);
+  console.error(`  ${DIM}npm:${RESET}     ${npmVer}`);
+  console.error(`  ${DIM}Path:${RESET}    ${cwd}`);
+  console.error(`  ${DIM}Lockfile:${RESET} ${existsSync(resolve(cwd, 'package-lock.json')) ? `${FG_GREEN}✓${RESET}` : `${FG_YELLOW}✗${RESET}`}`);
+  console.error(`  ${DIM}npx:${RESET}     ${execSync('npx --version', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()}`);
+  console.error(`\n  ${header}`);
+  console.error(`  ${sep}`);
+  for (const l of lines) console.error(l);
+  const total = tools.length;
+  const available = lines.filter((l) => l.includes(`${FG_GREEN}✓`)).length;
+  console.error(`\n  ${DIM}${available}/${total} tools available${RESET}`);
+  console.error('');
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry
 // ---------------------------------------------------------------------------
 
@@ -346,7 +552,7 @@ export async function runCLI(): Promise<void> {
     .description('Interactive terminal UI to browse audit issues')
     .action(async (projectPath) => {
       const report = await runAudit({
-        projectPath: resolve(process.cwd(), projectPath ?? '.'),
+        projectPath: await resolveTargetPath(projectPath),
         toolTimeoutMs: 180_000,
       });
       runTui(report);
@@ -364,9 +570,9 @@ export async function runCLI(): Promise<void> {
     .description('Store current audit as a baseline snapshot')
     .option('--file <path>', 'Baseline file path', 'goodjob-baseline.json')
     .action(async (projectPath, options) => {
-      const basePath = resolve(process.cwd(), projectPath ?? '.');
+      const basePath = await resolveTargetPath(projectPath);
       const report = await runAudit({ projectPath: basePath });
-      storeBaseline(report, resolve(basePath, options.file));
+      storeBaseline(report, await resolveOutputFile(projectPath, options.file));
       console.error(`\n  ${FG_GREEN}✓${RESET} Baseline stored: ${BOLD}${options.file}${RESET}`);
       console.error(`  ${baselineSummary(report)}`);
       console.error('');
@@ -377,8 +583,8 @@ export async function runCLI(): Promise<void> {
     .description('Diff current audit against a stored baseline')
     .option('--file <path>', 'Baseline file path', 'goodjob-baseline.json')
     .action(async (projectPath, options) => {
-      const basePath = resolve(process.cwd(), projectPath ?? '.');
-      const bPath = resolve(basePath, options.file);
+      const basePath = await resolveTargetPath(projectPath);
+      const bPath = await resolveOutputFile(projectPath, options.file);
       const baselineData = loadBaseline(bPath);
       if (!baselineData) {
         console.error(`\n  ${FG_RED}✗${RESET} Baseline not found: ${BOLD}${bPath}${RESET}`);
@@ -417,7 +623,7 @@ export async function runCLI(): Promise<void> {
     .command('pr-comment [project-path]')
     .description('Generate and post a PR/MR comment with audit summary')
     .action(async (projectPath) => {
-      const basePath = resolve(process.cwd(), projectPath ?? '.');
+      const basePath = await resolveTargetPath(projectPath);
       const report = await runAudit({ projectPath: basePath, toolTimeoutMs: 180_000 });
       const posted = postPrComment(report);
       if (!posted) {
@@ -469,6 +675,30 @@ export async function runCLI(): Promise<void> {
     });
 
   // -----------------------------------------------------------------------
+  // Subcommand: serve — web dashboard server
+  // -----------------------------------------------------------------------
+  program
+    .command('serve')
+    .description('Start web dashboard server with history and live audit')
+    .option('--port <number>', 'Server port', '3333')
+    .option('--open', 'Open browser automatically')
+    .action(async (options) => {
+      const { startServer } = await import('./serve.js');
+      const port = parseInt(options.port, 10) || 3333;
+      await startServer({ port, open: options.open ?? false });
+    });
+
+  // -----------------------------------------------------------------------
+  // Subcommand: doctor — environment diagnostics
+  // -----------------------------------------------------------------------
+  program
+    .command('doctor [project-path]')
+    .description('Diagnose tool availability and environment')
+    .action(async (projectPath) => {
+      await runDoctor(projectPath ?? '.');
+    });
+
+  // -----------------------------------------------------------------------
   // Main audit command (default — no matching subcommand)
   // -----------------------------------------------------------------------
   program
@@ -488,7 +718,10 @@ export async function runCLI(): Promise<void> {
     .option('--fix', 'Auto-fix fixable issues (npm audit fix, npm update outdated)')
     .option('--timeout <ms>', 'Per-tool timeout in milliseconds', '120000')
     .action(async (projectPath, opts) => {
-      const resolvedPath = resolve(process.cwd(), projectPath ?? '.');
+      const resolvedPath = await resolveTargetPath(projectPath);
+
+      // Live progress tracker
+      const progress = new ProgressTracker();
 
       const report = await runAudit({
         projectPath: resolvedPath,
@@ -497,19 +730,11 @@ export async function runCLI(): Promise<void> {
         verbose: opts.verbose ?? false,
         noCache: opts.cache === false,
         toolTimeoutMs: parseInt(opts.timeout, 10) || 120_000,
-        onToolStart(_name, label) {
-          console.error(`  ${BOLD}${label}${RESET} ${DIM}...${RESET}`);
+        onToolStart(name, label) {
+          progress.start(name, label);
         },
-        onToolComplete(_name, label, status, durationMs, issueCount) {
-          const elapsed = durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
-          const tag =
-            status === 'success'
-              ? `${FG_GREEN}✓${RESET}`
-              : status === 'skipped'
-                ? `${DIM}–${RESET}`
-                : `${FG_RED}✗${RESET}`;
-          const countInfo = issueCount > 0 ? ` ${FG_YELLOW}(${issueCount})${RESET}` : '';
-          console.error(`  ${tag} ${BOLD}${label}${RESET} ${DIM}${elapsed}${RESET}${countInfo}`);
+        onToolComplete(name, label, status, durationMs, issueCount) {
+          progress.complete(name, label, status, durationMs, issueCount);
         },
       });
 

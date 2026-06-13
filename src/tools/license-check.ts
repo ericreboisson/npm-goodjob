@@ -45,7 +45,27 @@ async function runLicenseChecker(options: ToolOptions): Promise<ToolResult> {
   const out = await runNpxToolCommand('license-checker', ['--json'], options);
 
   if (!out) {
-    return buildResult('license-check', 'License Check', 'via npx', [], Date.now() - start);
+    return {
+      tool: 'license-check',
+      label: 'License Check',
+      version: 'N/A',
+      status: 'error',
+      durationMs: Date.now() - start,
+      issues: [],
+      errorMessage: 'Failed to run license-checker via npx',
+    };
+  }
+
+  if (out.exitCode !== 0 && !out.stdout.trim()) {
+    return {
+      tool: 'license-check',
+      label: 'License Check',
+      version: 'via npx',
+      status: 'error',
+      durationMs: Date.now() - start,
+      issues: [],
+      errorMessage: (out.stderr || 'Non-zero exit code').slice(0, 500),
+    };
   }
 
   let data: LicenseCheckerOutput;

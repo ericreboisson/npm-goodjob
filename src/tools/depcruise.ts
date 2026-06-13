@@ -1,14 +1,17 @@
 // ---------------------------------------------------------------------------
 // npm-goodjob — dependency-cruiser runner
 // Validates architecture rules and detects circular dependencies.
-// We run the text output (or --validate mode) and report violations.
+// Auto-generates a TypeScript-aware config when tsconfig.json is present.
 // ---------------------------------------------------------------------------
 
-import type { ToolRunner, Issue, ToolOptions, ToolResult } from '../types.js';
+import { existsSync, writeFileSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { ToolRunner, Issue, ToolOptions, ToolResult } from '../types.ts';
 import {
   registerTool,
   isBinaryAvailable,
   isNpxAvailable,
+  isPackageInstalled,
   runToolCommand,
   runNpxToolCommand,
   buildResult,
@@ -21,19 +24,17 @@ export const depcruiseRunner: ToolRunner = {
   label: 'dependency-cruiser',
 
   isAvailable(cwd: string): boolean {
+    // Binary available locally, or npx can download the npm package
     return (
       isBinaryAvailable('depcruise', cwd) ||
       isBinaryAvailable('dependency-cruiser', cwd) ||
+      isPackageInstalled('dependency-cruiser', cwd) ||
       isNpxAvailable()
     );
   },
 
   async run(options: ToolOptions): Promise<ToolResult> {
     const start = Date.now();
-
-    const bin = isBinaryAvailable('depcruise', options.projectPath)
-      ? 'depcruise'
-      : 'dependency-cruiser';
 
     if (!this.isAvailable(options.projectPath)) {
       return skippedResult(
@@ -43,17 +44,50 @@ export const depcruiseRunner: ToolRunner = {
       );
     }
 
-    const useNpx =
-      !isBinaryAvailable('depcruise', options.projectPath) &&
-      !isBinaryAvailable('dependency-cruiser', options.projectPath) &&
-      isNpxAvailable();
+    // When binary is available locally, prefer depcruise (local binary name).
+    // When using npx, always use dependency-cruiser (npm package name).
+    const binLocal = isBinaryAvailable('depcruise', options.projectPath)
+      ? 'depcruise'
+      : 'dependency-cruiser';
+    const binaryFound = isBinaryAvailable('depcruise', options.projectPath) ||
+      isBinaryAvailable('dependency-cruiser', options.projectPath);
 
-    const toolName = useNpx ? 'dependency-cruiser' : bin;
-    const args = ['src', '--output-type', 'err-long', '--ignore-known', '--prefix', 'src'];
+    const useNpx = !binaryFound && isNpxAvailable();
+    const toolName = useNpx ? 'dependency-cruiser' : binLocal;
+
+    // Check if the project has its own depcruise config
+    const hasConfig = [
+      '.dependency-cruiser.js',
+      '.dependency-cruiser.cjs',
+      '.dependency-cruiser.mjs',
+      '.dependency-cruiser.json',
+    ].some((f) => existsSync(resolve(options.projectPath, f)));
+
+    const hasTsConfig = existsSync(resolve(options.projectPath, 'tsconfig.json'));
+    const tempConfigPath = resolve(options.projectPath, '.goodjob-depcruise.mjs');
+    let generatedTempConfig = false;
+
+    const args: string[] = ['src'];
+
+    if (!hasConfig) {
+      if (hasTsConfig) {
+        writeFileSync(tempConfigPath, generateDepcruiseTsConfig(), 'utf-8');
+        generatedTempConfig = true;
+        args.push('--config', '.goodjob-depcruise.mjs');
+      } else {
+        args.push('--no-config');
+      }
+    }
+    args.push('--output-type', 'err-long');
 
     const result = useNpx
       ? await runNpxToolCommand(toolName, args, options)
       : await runToolCommand(toolName, args, options);
+
+    // Clean up temp config
+    if (generatedTempConfig) {
+      try { rmSync(tempConfigPath, { force: true }); } catch { /* ok */ }
+    }
 
     if (!result) {
       return {
@@ -72,8 +106,29 @@ export const depcruiseRunner: ToolRunner = {
     const combined = `${stdout}\n${stderr}`.trim();
 
     if (!combined) {
-      const version = useNpx ? 'via npx' : getBinaryVersion(bin, options.projectPath);
+      const version = useNpx ? 'via npx' : getBinaryVersion(binLocal, options.projectPath);
       return buildResult('dependency-cruiser', 'dependency-cruiser', version, [], Date.now() - start);
+    }
+
+    // Check for hard errors first (non-zero exit with actual errors in output)
+    const errorLines = result.stderr
+      .split('\n')
+      .filter((l) => l.includes('ERROR') || l.includes('Error'))
+      .join('\n');
+    if (errorLines && !combined.includes('no dependency violations found')) {
+      const hasModule0 = combined.includes('0 modules');
+      if (!hasModule0) {
+        const version = useNpx ? 'via npx' : getBinaryVersion(binLocal, options.projectPath);
+        return {
+          tool: 'dependency-cruiser',
+          label: 'dependency-cruiser',
+          version,
+          status: 'error',
+          durationMs: Date.now() - start,
+          issues: [],
+          errorMessage: errorLines.slice(0, 500),
+        };
+      }
     }
 
     const issues: Issue[] = [];
@@ -117,9 +172,39 @@ export const depcruiseRunner: ToolRunner = {
       }
     }
 
-    const version = useNpx ? 'via npx' : getBinaryVersion(bin, options.projectPath);
+    const version = useNpx ? 'via npx' : getBinaryVersion(binLocal, options.projectPath);
     return buildResult('dependency-cruiser', 'dependency-cruiser', version, issues, Date.now() - start);
   },
 };
 
 registerTool(depcruiseRunner);
+
+function generateDepcruiseTsConfig(): string {
+  return `// Auto-generated by npm-goodjob for TypeScript support
+export default {
+  forbidden: [
+    {
+      name: "no-circular",
+      comment: "Circular dependencies cause maintenance issues",
+      severity: "error",
+      from: {},
+      to: { circular: true },
+    },
+    {
+      name: "no-duplicate-dep-types",
+      comment: "A dependency should only appear in one section of package.json",
+      severity: "warn",
+      from: {},
+      to: { dependencyTypes: ["npm-dev", "npm-optional", "npm-peer"] },
+    },
+  ],
+  options: {
+    doNotFollow: { path: "node_modules" },
+    tsConfig: { fileName: "tsconfig.json" },
+    tsPreCompilationDeps: true,
+    exclude: {
+      path: ["node_modules", "dist", "build", ".angular", ".next", "coverage"],
+    },
+  },
+};
+`;}

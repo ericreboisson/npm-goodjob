@@ -1,6 +1,6 @@
 {
   "name": "npm-goodjob",
-  "version": "0.1.1",
+  "version": "0.4.7",
   "description": "Unified NPM project audit aggregator — combine npm audit, depcheck, ESLint, ts-prune, dependency-cruiser, OSV-Scanner and more into one actionable report",
   "keywords": [
     "audit",
@@ -29,7 +29,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "npm-goodjob": "./bin/npm-goodjob.js"
+    "npm-goodjob": "bin/npm-goodjob.js"
   },
   "files": [
     "dist/",
