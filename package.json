@@ -1,0 +1,62 @@
+{
+  "name": "npm-goodjob",
+  "version": "0.1.0",
+  "description": "Unified NPM project audit aggregator — combine npm audit, depcheck, ESLint, ts-prune, dependency-cruiser, OSV-Scanner and more into one actionable report",
+  "keywords": [
+    "audit",
+    "npm-audit",
+    "depcheck",
+    "eslint",
+    "ts-prune",
+    "dependency-cruiser",
+    "osv-scanner",
+    "security",
+    "dependencies",
+    "angular",
+    "react"
+  ],
+  "homepage": "https://github.com/ericreboisson/npm-goodjob",
+  "license": "MIT",
+  "author": "Eric Reboisson",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "npm-goodjob": "./bin/npm-goodjob.js"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "goodjob": "node bin/npm-goodjob.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
