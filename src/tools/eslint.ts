@@ -166,6 +166,16 @@ export default [
 `;
 }
 
+function getEslintMajorVersion(cwd: string): number | null {
+  try {
+    const out = execSync('eslint --version', { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const m = out.trim().match(/^v?(\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const eslintRunner: ToolRunner = {
   name: 'eslint',
   label: 'ESLint',
@@ -189,6 +199,13 @@ export const eslintRunner: ToolRunner = {
     if (hasAnyConfig(options.projectPath)) {
       cmdArgs = ['.', '--format', 'json', '--no-color'];
     } else {
+      const eslintVersion = useNpx ? null : getEslintMajorVersion(options.projectPath);
+      if (eslintVersion !== null && eslintVersion < 9) {
+        return skippedResult(
+          'eslint', 'ESLint',
+          `No ESLint configuration found and eslint v${eslintVersion} does not support auto-generated flat config — install eslint v9+ or create an eslint config file`,
+        );
+      }
       if (hasTypeScript(options.projectPath)) {
         tsDepsDir = ensureTSSupport(options.projectPath);
       }

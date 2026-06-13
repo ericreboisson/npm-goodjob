@@ -68,6 +68,14 @@ export const snykRunner: ToolRunner = {
     }
 
     if (result.exitCode !== 0 && !result.stdout.trim()) {
+      // When snyk is unauthenticated, it exits non-zero and outputs
+      // {"ok":false,"error":"Use `snyk auth` to authenticate."} on stderr.
+      const stderrText = result.stderr || '';
+      let errMsg = stderrText.slice(0, 500);
+      try {
+        const parsed = JSON.parse(stderrText) as { ok?: boolean; error?: string };
+        if (parsed.ok === false && parsed.error) errMsg = parsed.error.slice(0, 500);
+      } catch { /* empty */ }
       return {
         tool: 'snyk',
         label: 'Snyk',
@@ -75,7 +83,7 @@ export const snykRunner: ToolRunner = {
         status: 'error',
         durationMs: Date.now() - start,
         issues: [],
-        errorMessage: (result.stderr || 'Non-zero exit code').slice(0, 500),
+        errorMessage: errMsg,
       };
     }
 
