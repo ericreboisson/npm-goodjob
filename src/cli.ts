@@ -345,7 +345,6 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
     { name: 'depcheck', ok: hasDepcheck },
     { name: 'eslint', ok: hasEslint },
     { name: 'ts-prune', ok: hasTypescript },
-    { name: 'osv-scanner', ok: false },
     { name: 'depcruise', ok: hasDepcheck },
     { name: 'snyk', ok: false },
     { name: 'socket', ok: false },

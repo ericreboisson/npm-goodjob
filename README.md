@@ -18,7 +18,7 @@ npx npm-goodjob . --html-output audit.html
 
 | Capability | Description |
 |---|---|
-| **15 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, OSV-Scanner, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures** |
+| **14 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures** |
 | **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
 | **Multi-project dashboard** | Architect oversight — run audits across all projects in one shot |
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
@@ -93,7 +93,6 @@ npx npm-goodjob .
 | depcheck | `depcheck` | Dependencies | `depcheck` in node_modules | npx --yes depcheck |
 | ts-prune | `ts-prune` | Dead code | `ts-prune` in PATH + tsconfig.json | npx ts-prune |
 | ESLint | `eslint` | Code quality | `eslint` in PATH + config file | npx eslint |
-| OSV-Scanner | `osv-scanner` | Security | `osv-scanner` in PATH or npx | osv-scanner / npx @google/osv-scanner |
 | dependency-cruiser | `depcruise` | Architecture | `depcruise` in PATH | npx depcruise |
 | dependency-check | `dependency-check` | Configuration | Always (built-in) | Internal |
 | license-check | `license-check` | License | Always (built-in) | Internal |
@@ -112,7 +111,7 @@ npx npm-goodjob .
 |---|---|
 | `[project-path]` | Project to audit (default: `.`) |
 | `-t, --tools <tools...>` | Run only these tools (`--tools npm-audit eslint`) |
-| `-s, --skip <tools...>` | Skip these tools (`--skip ts-prune osv-scanner`) |
+| `-s, --skip <tools...>` | Skip these tools (`--skip ts-prune depcruise`) |
 | `-j, --json` | Output JSON to stdout |
 | `-o, --output <file>` | Write JSON report to file |
 | `--html` | Output HTML to stdout |
@@ -193,7 +192,7 @@ Composite /20 score calculated from four dimensions (5 points each):
 
 | Dimension | Default weight | Sources |
 |---|---|---|
-| Security | /5 | npm audit, OSV-Scanner, secret-scanning, Snyk, Socket.dev, AuditJS, npm-signatures |
+| Security | /5 | npm audit, secret-scanning, Snyk, Socket.dev, AuditJS, npm-signatures |
 | Dependencies | /5 | npm outdated, depcheck, lockfile-analysis |
 | Code quality | /5 | ESLint, ts-prune, dependency-cruiser |
 | Project health | /5 | dependency-check, license-check, config validation |
@@ -684,7 +683,7 @@ Your tool is now auto-discovered by `runAudit()` and appears in all output forma
 | Feature | npm audit | snyk | socket.dev | **npm-goodjob** |
 |---|---|---|---|---|
 | npm audit | ✓ | | | ✓ |
-| OSA vulnerabilities | | ✓ | | ✓ (OSV-Scanner) |
+| OSA vulnerabilities | | ✓ | | — |
 | Unused dependencies | | | | ✓ (depcheck) |
 | Dead TypeScript exports | | | | ✓ (ts-prune) |
 | ESLint integration | | | | ✓ |
@@ -729,7 +728,7 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 - **Node.js >= 20**
 - npm (for audit tools)
-- Optional tools (depcheck, eslint, ts-prune, osv-scanner, depcruise, snyk, socket, auditjs) — auto-skipped if missing, fall back to npx when possible
+- Optional tools (depcheck, eslint, ts-prune, depcruise, snyk, socket, auditjs) — auto-skipped if missing, fall back to npx when possible
 
 ---
 

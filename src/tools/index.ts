@@ -12,7 +12,6 @@ export { depcheckRunner } from './depcheck.js';
 export { npmOutdatedRunner } from './npm-outdated.js';
 export { tsPruneRunner } from './ts-prune.js';
 export { eslintRunner } from './eslint.js';
-export { osvScannerRunner } from './osv-scanner.js';
 export { depcruiseRunner } from './depcruise.js';
 export { dependencySanityRunner } from './dependency-check.js';
 export { licenseCheckRunner } from './license-check.js';
