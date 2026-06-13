@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ericreboisson/npm-goodjob/actions/workflows/ci.yml/badge.svg)](https://github.com/ericreboisson/npm-goodjob/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/npm-goodjob.svg)](https://www.npmjs.com/package/npm-goodjob)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c)](https://github.com/ericreboisson/npm-goodjob/network/updates)
 
@@ -616,7 +616,7 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 ## Requirements
 
-- **Node.js >= 18**
+- **Node.js >= 20**
 - npm (for audit tools)
 - Optional tools (depcheck, eslint, ts-prune, osv-scanner, depcruise) — auto-skipped if missing
 
