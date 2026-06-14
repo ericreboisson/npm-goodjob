@@ -21,3 +21,6 @@ export { snykRunner } from './snyk.js';
 export { socketRunner } from './socket.js';
 export { auditJsRunner } from './auditjs.js';
 export { npmSignaturesRunner } from './npm-signatures.js';
+export { pkgLintRunner } from './pkg-lint.js';
+export { architectRunner } from './architect.js';
+export { knipRunner } from './knip.js';

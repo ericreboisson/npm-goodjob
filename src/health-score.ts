@@ -214,6 +214,36 @@ function computeCodeQualityScore(report: AuditReport, maxScore: number): ScoreCa
     }
   }
 
+  // Architect quality/architecture issues
+  const architectTool = report.tools['architect'];
+  if (architectTool) {
+    const qualIssues = architectTool.issues.filter(
+      (i) => (i.category === 'quality' || i.category === 'architecture') && i.level !== 'info',
+    );
+    if (qualIssues.length > 0) {
+      const deduct = Math.min(1.0, qualIssues.length * 0.15);
+      score -= deduct;
+      deductions.push(`-${deduct} architect issues`);
+    }
+  }
+
+  // knip dead code (unused exports, files, etc.)
+  const knipTool = report.tools['knip'];
+  if (knipTool) {
+    const deadCode = knipTool.issues.filter((i) => i.category === 'dead-code').length;
+    if (deadCode > 0) {
+      const deduct = Math.min(1.0, deadCode * 0.1);
+      score -= deduct;
+      deductions.push(`-${deduct} knip dead code`);
+    }
+    const unresolved = knipTool.issues.filter((i) => i.category === 'missing-dependency').length;
+    if (unresolved > 0) {
+      const deduct = Math.min(0.5, unresolved * 0.15);
+      score -= deduct;
+      deductions.push(`-${deduct} knip unresolved`);
+    }
+  }
+
   score = Math.max(0, Math.round(score * 10) / 10);
 
   const detail =
@@ -283,6 +313,24 @@ function computeProjectHealthScore(report: AuditReport, maxScore: number): Score
       const deduct = Math.min(0.8, missing * 0.2);
       score -= deduct;
       deductions.push(`-${deduct} missing deps`);
+    }
+  }
+
+  // pkg-lint configuration issues (missing README, LICENSE, engines, etc.)
+  const pkgLintTool = report.tools['pkg-lint'];
+  if (pkgLintTool) {
+    const warnCount = pkgLintTool.issues.filter((i) => i.level === 'warning').length;
+    if (warnCount > 5) {
+      score -= 0.5;
+      deductions.push('-0.5 pkg-lint warnings');
+    } else if (warnCount > 0) {
+      score -= 0.2;
+      deductions.push('-0.2 pkg-lint warnings');
+    }
+    const infoCount = pkgLintTool.issues.filter((i) => i.level === 'info').length;
+    if (infoCount > 8) {
+      score -= 0.2;
+      deductions.push('-0.2 many pkg-lint suggestions');
     }
   }
 

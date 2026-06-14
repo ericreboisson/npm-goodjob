@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c)](https://github.com/ericreboisson/npm-goodjob/network/updates)
 
-**Unified npm project audit aggregator** — run 15 audit tools with one command, get one report with health score, policy enforcement, SBOM, SARIF, baseline diff, web dashboard, and interactive TUI.
+**Unified npm project audit aggregator** — run 17 audit tools with one command, get one report with health score, policy enforcement, SBOM, SARIF, baseline diff, web dashboard, and interactive TUI.
 
 ```bash
 npx npm-goodjob . --html-output audit.html
@@ -18,7 +18,7 @@ npx npm-goodjob . --html-output audit.html
 
 | Capability | Description |
 |---|---|
-| **14 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures** |
+| **17 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
 | **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
 | **Multi-project dashboard** | Architect oversight — run audits across all projects in one shot |
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
@@ -98,6 +98,9 @@ npx npm-goodjob .
 | license-check | `license-check` | License | Always (built-in) | Internal |
 | lockfile-analysis | `lockfile-analysis` | Dependencies | Always (built-in) | Internal |
 | secret-scanning | `secret-scanning` | Security | Always (built-in) | Internal |
+| pkg-lint | `pkg-lint` | Configuration | Always (built-in) | Internal |
+| architect | `architect` | Architecture | Always (built-in) | Internal |
+| knip | `knip` | Dead code | `knip` in PATH + tsconfig.json | npx knip |
 
 > **Zero-config**: tools not installed are silently skipped. Add `--verbose` to see skip reasons.
 
@@ -708,7 +711,7 @@ Your tool is now auto-discovered by `runAudit()` and appears in all output forma
 | **npm audit signatures** | ✓ | | | ✓ |
 | **Web dashboard server** | | | | ✓ |
 | **Audit history** | | | | ✓ |
-| **Single command** | ✓ | ✓ | ✓ | ✓ (15 tools) |
+| **Single command** | ✓ | ✓ | ✓ | ✓ (17 tools) |
 
 ---
 
