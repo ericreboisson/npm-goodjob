@@ -228,8 +228,17 @@ export interface GoodjobConfig {
       severity: 'critical' | 'high' | 'medium';
     }>;
   };
+  /** Package lint custom validation rules */
+  pkgLint?: PkgLintConfig;
   /** Multi-project dashboard config */
   projects?: DashboardProject[];
+}
+
+export interface PkgLintConfig {
+  /** Additional fields that must exist in package.json (dot-separated paths supported) */
+  requireFields?: string[];
+  /** Field path → regex pattern — validates the field value against the pattern */
+  fieldPatterns?: Record<string, string>;
 }
 
 /** Options passed to every tool runner */

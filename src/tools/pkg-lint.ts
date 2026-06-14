@@ -6,7 +6,7 @@
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ToolRunner, Issue, ToolOptions, ToolResult } from '../types.js';
+import type { ToolRunner, Issue, ToolOptions, ToolResult, PkgLintConfig } from '../types.js';
 import {
   registerTool,
   buildResult,
@@ -294,6 +294,80 @@ function lintConfigSanity(pkg: PkgJson, issues: Issue[]): void {
 // Runner
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Config-based custom field validation
+// ---------------------------------------------------------------------------
+
+/** Resolve a dot-separated field path on an object, e.g. "publishConfig.access" */
+function resolveFieldPath(obj: Record<string, unknown>, path: string): unknown {
+  let current: unknown = obj;
+  for (const key of path.split('.')) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function lintCustomConfig(pkg: PkgJson, config: PkgLintConfig | undefined, issues: Issue[]): void {
+  if (!config) return;
+
+  // Custom required fields
+  if (config.requireFields) {
+    for (const field of config.requireFields) {
+      const value = resolveFieldPath(pkg as unknown as Record<string, unknown>, field);
+      if (value === undefined || value === null || value === '') {
+        issues.push({
+          level: 'warning',
+          tool: 'pkg-lint',
+          category: 'configuration',
+          severity: 'medium',
+          message: `Required custom field "${field}" is missing or empty in package.json`,
+          detail: `Add "${field}" to meet project policy requirements.`,
+        });
+      }
+    }
+  }
+
+  // Field pattern validation
+  if (config.fieldPatterns) {
+    for (const [field, pattern] of Object.entries(config.fieldPatterns)) {
+      const value = resolveFieldPath(pkg as unknown as Record<string, unknown>, field);
+      if (value === undefined || value === null) {
+        issues.push({
+          level: 'info',
+          tool: 'pkg-lint',
+          category: 'configuration',
+          severity: 'low',
+          message: `Field "${field}" is missing — cannot validate pattern "${pattern}"`,
+        });
+        continue;
+      }
+      const strVal = String(value);
+      try {
+        const regex = new RegExp(pattern);
+        if (!regex.test(strVal)) {
+          issues.push({
+            level: 'warning',
+            tool: 'pkg-lint',
+            category: 'configuration',
+            severity: 'medium',
+            message: `Field "${field}" value "${strVal}" does not match required pattern "${pattern}"`,
+            detail: `Expected pattern: ${pattern}`,
+          });
+        }
+      } catch {
+        issues.push({
+          level: 'warning',
+          tool: 'pkg-lint',
+          category: 'configuration',
+          severity: 'low',
+          message: `Invalid regex pattern "${pattern}" for field "${field}" — check your .goodjobrc`,
+        });
+      }
+    }
+  }
+}
+
 export const pkgLintRunner: ToolRunner = {
   name: 'pkg-lint',
   label: 'Package lint',
@@ -315,6 +389,7 @@ export const pkgLintRunner: ToolRunner = {
     lintFilesExist(p, pkg, issues);
     lintConfigFiles(p, pkg, issues);
     lintConfigSanity(pkg, issues);
+    lintCustomConfig(pkg, options.config?.pkgLint, issues);
 
     return buildResult('pkg-lint', 'Package lint', 'built-in', issues, Date.now() - start);
   },

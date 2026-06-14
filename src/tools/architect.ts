@@ -55,16 +55,59 @@ function detectFramework(projectPath: string): Framework {
   return 'node';
 }
 
+/** Strip // and /* *\/ comments from JSONC text so JSON.parse can handle it */
+function stripJsonComments(raw: string): string {
+  let inString = false;
+  let result = '';
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i];
+    const next = raw[i + 1] ?? '';
+    if (inString) {
+      if (ch === '"' && raw[i - 1] !== '\\') inString = false;
+      result += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"') { inString = true; result += ch; i++; continue; }
+    if (ch === '/' && next === '/') {
+      while (i < raw.length && raw[i] !== '\n') i++;
+      result += '\n';
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < raw.length && !(raw[i] === '*' && raw[i + 1] === '/')) i++;
+      i += 2; // skip */
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
+function safeJsonParse(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Try stripping comments (JSONC)
+    try {
+      return JSON.parse(stripJsonComments(raw)) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
 function readTsConfig(projectPath: string): TsConfigJson | null {
   const candidates = ['tsconfig.json', 'tsconfig.app.json', 'tsconfig.base.json'];
   for (const f of candidates) {
     const fp = resolve(projectPath, f);
     if (existsSync(fp)) {
-      try {
-        return JSON.parse(readFileSync(fp, 'utf-8')) as TsConfigJson;
-      } catch {
-        return null;
-      }
+      const parsed = safeJsonParse(readFileSync(fp, 'utf-8'));
+      if (parsed) return parsed as TsConfigJson;
     }
   }
   return null;
