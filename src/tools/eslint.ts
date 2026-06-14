@@ -103,6 +103,10 @@ function ensureTSSupport(cwd: string): string | null {
 }
 
 function generateFlatConfig(tsDepsDir: string | null): string {
+  // Ignore .goodjob-* temp configs from other parallel tools, or
+  // ESLint 10.x auto-discovers them and crashes with ENOENT on cleanup.
+  const globalIgnore = `{ ignores: [".goodjob-*"] }`;
+
   const jsBlock = `{
     files: ["**/*.js", "**/*.mjs", "**/*.cjs"],
     ignores: [".goodjob-eslintrc.mjs"],
@@ -122,7 +126,7 @@ function generateFlatConfig(tsDepsDir: string | null): string {
   }`;
 
   if (!tsDepsDir) {
-    return `export default [${jsBlock}];\n`;
+    return `export default [${globalIgnore},\n  ${jsBlock}];\n`;
   }
 
   const escapedDir = tsDepsDir.replace(/\\/g, '\\\\/');
@@ -140,6 +144,7 @@ try {
 } catch { /* TS deps not ready */ }
 
 export default [
+  ${globalIgnore},
   ${jsBlock},
   ...(tsParser && tsPlugin ? [{
     files: ["**/*.ts", "**/*.tsx"],
@@ -235,8 +240,22 @@ export const eslintRunner: ToolRunner = {
     }
 
     const stdout = result.stdout.trim();
+    const stderr = result.stderr.trim();
 
     if (!stdout || stdout === '[]') {
+      if (stderr && result.exitCode && result.exitCode !== 0) {
+        const version = useNpx ? 'via npx' : getBinaryVersion('eslint', options.projectPath);
+        const firstLine = stderr.split('\n')[0] || '';
+        return {
+          tool: 'eslint',
+          label: 'ESLint',
+          version,
+          status: 'error',
+          durationMs: Date.now() - start,
+          issues: [],
+          errorMessage: `ESLint error: ${firstLine}`,
+        };
+      }
       const version = useNpx ? 'via npx' : getBinaryVersion('eslint', options.projectPath);
       return buildResult('eslint', 'ESLint', version, [], Date.now() - start);
     }
