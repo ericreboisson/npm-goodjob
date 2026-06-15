@@ -17,14 +17,23 @@ npx npm-goodjob . --html-output audit.html
 ## Features
 
 | Capability | Description |
-|---|---|
+|---|---|---|
 | **17 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
 | **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
+| **Auto-fix** | `--fix` auto-fixes npm audit vulnerabilities, updates outdated deps, fixes package.json issues, dedupes lockfile |
+| **Monorepo support** | Automatic npm/yarn/pnpm workspace detection — audits root + all packages in one command |
+| **Dependency drift** | Built-in lockfile analysis detects mismatches between package.json and package-lock.json |
+| **Issue exclusions** | Configure per-project exclusions to suppress known false positives |
 | **Multi-project dashboard** | Architect oversight — run audits across all projects in one shot |
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
+| **Severity-weighted score** | Penalty model (critical=-3, high=-2, medium=-1, low=-0.5) with `--strict` enforcement |
 | **Policy as Code** | Expression-based rules (`severity.critical > 0`) with error/warning levels |
 | **SBOM (SPDX 2.3)** | Software Bill of Materials with PURLs, licenses — CRA compliant |
-| **Baseline + Diff** | Store a snapshot, diff against future runs, detect regressions |
+| **Baseline + Diff** | Store a snapshot, diff against future runs, detect regressions and new CVEs |
+| **Trend tracking** | Auto-saved run history in `.goodjob-data/history/`, `baseline trend` for health evolution |
+| **Team dashboard** | Per-developer git blame, top flops ranking, regressions view in HTML dashboard |
+| **Fast mode** | `--fast` runs only 6 built-in tools — ideal for pre-commit or quick health checks |
+| **Dry-run mode** | `--dry-run` replays recorded snapshots without real tool execution — CI without network |
 | **Interactive TUI** | Keyboard-navigable issue browser (`npx npm-goodjob tui`) |
 | **Pre-commit hook** | Fast checks (secret-scanning + lockfile-analysis) before every commit |
 | **PR/MR comments** | Auto-post health summary to GitHub/GitLab PRs |
@@ -103,6 +112,8 @@ npx npm-goodjob .
 | knip | `knip` | Dead code | `knip` in PATH + tsconfig.json | npx knip |
 
 > **Zero-config**: tools not installed are silently skipped. Add `--verbose` to see skip reasons.
+>
+> **No results is normal**: many tools report 0 issues on well-maintained projects. dependency-cruiser (no circular deps), Socket.dev (requires API key), and AuditJS (requires OSS Index account) may show "(via npx)" with 0 results if the CLI is not configured — this is expected. Install the CLI + authenticate for full results.
 
 ---
 
@@ -111,7 +122,7 @@ npx npm-goodjob .
 ### Flags
 
 | Flag | Description |
-|---|---|
+|---|---|---|
 | `[project-path]` | Project to audit (default: `.`) |
 | `-t, --tools <tools...>` | Run only these tools (`--tools npm-audit eslint`) |
 | `-s, --skip <tools...>` | Skip these tools (`--skip ts-prune depcruise`) |
@@ -124,7 +135,12 @@ npx npm-goodjob .
 | `--sbom` | Output SPDX 2.3 SBOM to stdout |
 | `--sbom-output <file>` | Write SPDX 2.3 SBOM to file |
 | `-v, --verbose` | Show raw tool output and skip reasons |
+| `--fix` | Auto-fix fixable issues (npm audit fix, npm update, package.json fixes, lockfile dedupe) |
 | `--timeout <ms>` | Per-tool timeout (default: 120000) |
+| `--fast` | Built-in tools only (architect, secret-scanning, lockfile-analysis, dependency-check, license-check, pkg-lint) — no npx, no network |
+| `--strict` | Exit code 1 if severity-weighted health score < 15 (configurable in `.goodjobrc`) |
+| `--dry-run` | Load tool results from pre-recorded snapshots — no real tool execution |
+| `--record` | Run real tools and save results as snapshots for future `--dry-run` |
 
 ### Subcommands
 
@@ -132,8 +148,11 @@ npx npm-goodjob .
 |---|---|
 | `init [path]` | Scaffold `.goodjobrc` for a project (detects Angular/React/Node) |
 | `init [path] --ci` | Same + create GitHub Actions + GitLab CI workflows |
+| `clean [path]` | Remove `.goodjob-data/` (history, runs, snapshots) + `.goodjob-cache/` |
+| `clean [path] --all` | Same + remove `.goodjobrc` configuration file |
 | `baseline store [path] [--file]` | Store current audit as baseline snapshot |
-| `baseline diff [path] [--file]` | Diff current audit against stored baseline |
+| `baseline diff [path] [--file]` | Diff current audit against stored baseline (includes CVE detection, category regressions, trend) |
+| `baseline trend [path]` | Show health score trend from auto-saved run history |
 | `pre-commit install` | Install git pre-commit hook (secret-scanning + lockfile) |
 | `pre-commit` | Run pre-commit checks manually |
 | `pr-comment [path]` | Generate + post PR comment to GitHub/GitLab |
@@ -142,6 +161,57 @@ npx npm-goodjob .
 | `tui [path]` | Interactive terminal UI (arrow keys, Enter for details) |
 
 ---
+
+## Auto-fix (`--fix`)
+
+The `--fix` flag runs an automated fix engine after the audit completes. It can resolve common issues automatically:
+
+| Fixer | What it fixes |
+|---|---|
+| **npm audit fix** | Fixes known vulnerabilities (safe fixes only — semver-compatible updates) |
+| **npm update** | Updates outdated packages within semver range |
+| **package.json** | Adds missing `engines.node`, removes duplicate deps (same dep in both `dependencies` and `devDependencies`), sets `private: true` for workspace roots |
+| **Lockfile** | Regenerates missing `package-lock.json`, runs `npm dedupe` to remove duplicates |
+| **Config files** | Converts JSONC to valid JSON for `tsconfig.json` (strips comments, trailing commas) |
+
+```bash
+npx npm-goodjob . --fix
+```
+
+Output includes a fix results section:
+```
+  ── Fix Results ──────────────────────────
+  ✓ npm audit fix: fixed 3 of 5 vulnerabilities
+  ✓ npm update: completed (deps updated within semver range)
+  ✓ package.json: Added "engines.node": ">=20"
+  ✓ lockfile: npm dedupe completed
+  ──────────────────────────────────────────
+```
+
+### Monorepo support
+
+npm-goodjob auto-detects npm/yarn/pnpm workspaces from `package.json workspaces` or `pnpm-workspace.yaml`. When a monorepo is detected, it audits the root + all workspace packages in a single command:
+
+```bash
+npx npm-goodjob .
+```
+
+Output includes a monorepo summary showing per-package results:
+```
+  Monorepo: 4 packages audited
+  Packages: (root) (12 issues), app (5 issues), lib (0 issues), shared (8 issues)
+```
+
+Workspace package results are prefixed with the package name (e.g. `app/npm-audit`, `shared/eslint`).
+
+### Dependency drift detection
+
+The built-in `dependency-check` tool compares dependency versions declared in `package.json` against their resolved versions in `package-lock.json`. It detects:
+
+- **Missing dependencies**: dep declared in `package.json` but absent from lockfile (merge conflict residue)
+- **Version mismatches**: exact version in `package.json` doesn't match lockfile (e.g. `"lodash": "4.17.21"` but lockfile has `4.17.20`)
+
+This check runs automatically as part of every audit — no config needed.
 
 ## Output formats
 
@@ -177,7 +247,7 @@ npx npm-goodjob . --json | jq '.summary'
 
 ### HTML
 
-Standalone HTML report with health circle chart, severity bar chart, and per-tool expandable issue lists. Generated via `--html-output`.
+Standalone HTML report with health circle chart, **SVG donut chart** (severity breakdown), **SVG bar chart** (category breakdown), severity-weighted score, and per-tool expandable issue lists. Generated via `--html-output`.
 
 ### SARIF 2.1.0
 
@@ -191,6 +261,10 @@ npx npm-goodjob . --sarif-output results.sarif
 
 ## Health score
 
+Two scores are computed for every audit:
+
+### Flat score (/20)
+
 Composite /20 score calculated from four dimensions (5 points each):
 
 | Dimension | Default weight | Sources |
@@ -200,16 +274,48 @@ Composite /20 score calculated from four dimensions (5 points each):
 | Code quality | /5 | ESLint, ts-prune, dependency-cruiser |
 | Project health | /5 | dependency-check, license-check, config validation |
 
+### Severity-weighted score (/20)
+
+Penalty model that accounts for issue severity: starts at 20, subtracts penalties per issue, floored at 0.
+
+| Severity | Penalty |
+|---|---|
+| Critical | -3 points |
+| High | -2 points |
+| Medium | -1 point |
+| Low | -0.5 point |
+
+Example: a report with 3 critical + 2 high issues → `20 - (3×3 + 2×2) = 20 - 13 = 7/20`.
+
+The weighted score and top 5 penalties appear in both console and HTML output.
+
+### Strict mode (`--strict`)
+
+Exit code 1 if the severity-weighted score falls below a threshold (default: 15/20). Useful for CI gates:
+
+```bash
+npx npm-goodjob . --strict        # exit 1 if weighted score < 15
+npx npm-goodjob . --strict --fast # quick CI gate, built-in tools only
+```
+
+### Configuration
+
 Configurable via `.goodjobrc`:
 
 ```json
 {
   "healthScore": {
     "weights": { "security": 8, "dependencies": 4, "codeQuality": 4, "projectHealth": 4 },
-    "thresholds": { "good": 18, "warning": 14 }
+    "thresholds": {
+      "good": 18,
+      "warning": 14,
+      "strict": 15
+    }
   }
 }
 ```
+
+The `strict` threshold is only used by `--strict`. The `good` and `warning` thresholds control display coloring only.
 
 ---
 
@@ -284,7 +390,25 @@ Diff output shows:
 - **Health change**: `14/20 → 12/20 (▼ -2)`
 - **Severity changes**: `4 → 5 critical (▲ +1)`
 - **Tool changes**: new tools, tool errors, issue counts
+- **New CVEs**: CVEs present in current run but absent from baseline
+- **Category regressions**: per-category issue increase (e.g. `security: +3`)
+- **Trend sparkline**: weighted score evolution over last 10 runs: `15 → 16 → 14 → 17`
 - **New issues**: first occurrence since baseline
+
+### Auto-saved run history
+
+Every audit is automatically saved to `.goodjob-data/history/` (last 30 runs kept).
+
+```bash
+# Show trend from auto-saved history
+npx npm-goodjob baseline trend .
+
+# Example output:
+#   2026-06-14 12:30  15/20  42 issues
+#   2026-06-14 12:35  17/20  38 issues
+#   2026-06-14 12:40  16/20  41 issues
+#   Direction: ↗ +1
+```
 
 ---
 
@@ -328,7 +452,14 @@ Relative paths are resolved from the `.goodjobrc` location.
 
 Sorted by worst health first. Failed projects (no `package.json`, audit crash) shown at the top with `✗ ERROR`.
 
-**HTML** — responsive dashboard with project cards, health circles, severity bars, and collapsible drill-down per project:
+**HTML** — responsive dashboard with project cards, health circles, severity bars, collapsible drill-down per project, and a **Team** tab:
+
+| Team view section | Description |
+|---|---|
+| **Git blame** | Top 10 developers by total issue weight (severity × count) |
+| **Top flops** | Worst offending files ranked by aggregated severity score |
+| **By developer** | Full issue list grouped by committer from git blame |
+| **Regressions** | Issues that appeared or worsened since the last recorded audit |
 
 ```bash
 npx npm-goodjob dashboard --html-output dashboard.html
@@ -544,6 +675,44 @@ Create a `.goodjobrc`, `.goodjobrc.json`, or `goodjob.config.json` in your proje
         "pattern": "my-internal-api-key-[A-Za-z0-9]+",
         "severity": "high"
       }
+    ]
+  },
+
+  // Issue exclusions — suppress known false positives by tool, package, message, severity, or category
+  "issues": {
+    "ignored": [
+      // Suppress depcheck's "unused tslib" (used by Angular compiler, not directly imported)
+      { "tool": "depcheck", "message": "tslib", "reason": "Used by Angular compiler internally" },
+      // Suppress a specific npm audit advisory by package name
+      { "tool": "npm-audit", "package": "@angular-devkit/build-angular", "reason": "Dev-only, not exploitable in our context" },
+      // Suppress all low-severity issues from a tool
+      { "tool": "depcheck", "severity": "low", "reason": "Depcheck low severity are devDependency hints" }
+    ]
+  }
+}
+```
+
+### Issue exclusions
+
+The `issues.ignored` array lets you suppress known false positives. Each exclusion can match by:
+
+| Field | Description |
+|---|---|
+| `tool` | Tool name (e.g. `"depcheck"`, `"npm-audit"`) |
+| `package` | Package name (exact match) |
+| `message` | Text match (case-insensitive substring) |
+| `severity` | Severity level (`"critical"`, `"high"`, `"medium"`, `"low"`) |
+| `category` | Issue category (e.g. `"security"`, `"unused-dependency"`) |
+| `reason` | Human-readable reason (optional, appears in verbose mode) |
+
+Example — suppress Angular-specific false positives:
+```json
+{
+  "issues": {
+    "ignored": [
+      { "tool": "depcheck", "package": "tslib", "reason": "Used by Angular compiler" },
+      { "tool": "depcheck", "package": "@angular/compiler-cli", "reason": "Build tool, not a runtime dep" },
+      { "tool": "depcheck", "severity": "low", "reason": "Only info-level hints" }
     ]
   }
 }
