@@ -13,6 +13,7 @@ import {
   errorResult,
   getInstalledPackageVersion,
   ensureLockfile,
+  debugLog,
 } from './base.js';
 
 /** Shape of `npm audit --json` output (simplified — we only care about
@@ -120,6 +121,7 @@ export const npmAuditRunner: ToolRunner = {
     // expected behaviour, not a failure.  Parse whatever came back on stdout.
     const stdout = result.stdout.trim();
     if (!stdout) {
+      debugLog(options.verbose, `npm-audit: stdout empty (stderr: "${result.stderr.slice(0, 500)}")`);
       return buildResult('npm-audit', 'npm audit', npmVersion(), [], Date.now() - start);
     }
 
@@ -127,7 +129,7 @@ export const npmAuditRunner: ToolRunner = {
     try {
       parsed = JSON.parse(stdout) as NpmAuditJson;
     } catch {
-      // Sometimes npm audit --json emits non-JSON on stderr
+      debugLog(options.verbose, `npm-audit: JSON parse failed — stdout (${stdout.length} chars): ${stdout.slice(0, 1000)}`);
       return buildResult('npm-audit', 'npm audit', npmVersion(), [], Date.now() - start);
     }
 

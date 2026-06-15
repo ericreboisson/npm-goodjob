@@ -29,6 +29,30 @@ export function getAllTools(): ToolRunner[] {
 }
 
 // ---------------------------------------------------------------------------
+// Logging helpers
+// ---------------------------------------------------------------------------
+
+const DEBUG_PREFIX = '\x1b[2m[npm-goodjob:debug]\x1b[0m';
+const VERBOSE_PREFIX = '\x1b[2m[npm-goodjob:verbose]\x1b[0m';
+
+/**
+ * Print debug log to stderr when verbose mode is enabled.
+ * Prefixes with [npm-goodjob:debug] for easy filtering.
+ */
+export function debugLog(verbose: boolean, ...args: unknown[]): void {
+  if (!verbose) return;
+  process.stderr.write(`${DEBUG_PREFIX} ${args.map(a => String(a)).join(' ')}\n`);
+}
+
+/**
+ * Print raw command output to stderr when verbose mode is enabled.
+ */
+export function verboseLog(verbose: boolean, ...args: unknown[]): void {
+  if (!verbose) return;
+  process.stderr.write(`${VERBOSE_PREFIX} ${args.map(a => String(a)).join(' ')}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Package metadata helpers
 // ---------------------------------------------------------------------------
 
@@ -47,15 +71,23 @@ export interface PackageJson {
   [key: string]: unknown;
 }
 
-let _cachedPkg: PackageJson | null = null;
+/** Cache keyed by resolved project path so monorepo audits don't reuse stale data. */
+const _pkgCache = new Map<string, PackageJson>();
 
 export function readPackageJson(projectPath: string): PackageJson {
-  if (_cachedPkg) return _cachedPkg;
+  const cached = _pkgCache.get(projectPath);
+  if (cached) return cached;
   const p = resolve(projectPath, 'package.json');
-  _cachedPkg = existsSync(p)
+  const pkg = existsSync(p)
     ? (JSON.parse(readFileSync(p, 'utf-8')) as PackageJson)
     : {};
-  return _cachedPkg;
+  _pkgCache.set(projectPath, pkg);
+  return pkg;
+}
+
+/** Clear the package.json cache — useful when auditing multiple projects. */
+export function clearPackageJsonCache(): void {
+  _pkgCache.clear();
 }
 
 /**
@@ -127,17 +159,6 @@ export function isNpxAvailable(): boolean {
 }
 
 /**
- * Run a tool via npx --yes (auto-download if not installed).
- */
-export async function runNpxToolCommand(
-  tool: string,
-  args: string[],
-  options: ToolOptions,
-): Promise<CommandResult | null> {
-  return runToolCommand('npx', ['--yes', tool, ...args], options);
-}
-
-/**
  * Try to get the version string of a binary.
  */
 export function getBinaryVersion(name: string, cwd: string): string {
@@ -169,21 +190,41 @@ export async function runToolCommand(
   args: string[],
   options: ToolOptions,
 ): Promise<CommandResult | null> {
+  debugLog(options.verbose, `exec: ${bin} ${args.join(' ')}`);
+  debugLog(options.verbose, `cwd: ${options.projectPath}`);
+
   try {
     const { stdout, stderr } = await execFileAsync(bin, args, {
       cwd: options.projectPath,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
+    verboseLog(options.verbose, `stdout (${stdout.length} chars):`, stdout.slice(0, 2000));
+    if (stderr) verboseLog(options.verbose, `stderr:`, stderr.slice(0, 2000));
     return { stdout, stderr, exitCode: 0 };
   } catch (err: unknown) {
     // child_process errors have stdout/stderr and code even on non-zero exit
     if (err && typeof err === 'object' && 'stdout' in err) {
       const e = err as { stdout: string; stderr: string; code?: number };
+      verboseLog(options.verbose, `exit code ${e.code ?? 1}`);
+      verboseLog(options.verbose, `stdout (${e.stdout?.length ?? 0} chars):`, (e.stdout ?? '').slice(0, 2000));
+      if (e.stderr) verboseLog(options.verbose, `stderr:`, e.stderr.slice(0, 2000));
       return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: e.code ?? 1 };
     }
+    debugLog(options.verbose, `exec failed: ${bin} — catastrophic error`, String(err));
     return null;
   }
+}
+
+/**
+ * Run a tool via npx --yes with verbose logging.
+ */
+export async function runNpxToolCommand(
+  tool: string,
+  args: string[],
+  options: ToolOptions,
+): Promise<CommandResult | null> {
+  return runToolCommand('npx', ['--yes', tool, ...args], options);
 }
 
 // ---------------------------------------------------------------------------

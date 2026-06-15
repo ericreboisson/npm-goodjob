@@ -15,6 +15,7 @@ import {
   runToolCommand,
   runNpxToolCommand,
   getBinaryVersion,
+  debugLog,
 } from './base.js';
 
 // Depcheck types (subset we need)
@@ -106,6 +107,7 @@ export const depcheckRunner: ToolRunner = {
 
     const stdout = result.stdout.trim();
     if (!stdout) {
+      debugLog(options.verbose, `depcheck: stdout empty (stderr: "${result.stderr.slice(0, 500)}")`);
       const version = getBinaryVersion('depcheck', options.projectPath);
       return buildResult('depcheck', 'depcheck', version, [], Date.now() - start);
     }
@@ -114,6 +116,7 @@ export const depcheckRunner: ToolRunner = {
     try {
       parsed = JSON.parse(stdout) as DepcheckResult;
     } catch {
+      debugLog(options.verbose, `depcheck: JSON parse failed — stdout (${stdout.length} chars): ${stdout.slice(0, 1000)}`);
       const version = getBinaryVersion('depcheck', options.projectPath);
       return buildResult('depcheck', 'depcheck', version, [], Date.now() - start);
     }

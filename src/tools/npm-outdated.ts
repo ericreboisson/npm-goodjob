@@ -13,6 +13,7 @@ import {
   skippedResult,
   readPackageJson,
   ensureLockfile,
+  debugLog,
 } from './base.js';
 
 interface NpmOutdatedRow {
@@ -63,6 +64,7 @@ export const npmOutdatedRunner: ToolRunner = {
 
     const stdout = result.stdout.trim();
     if (!stdout) {
+      debugLog(options.verbose, `npm-outdated: stdout empty (stderr: "${result.stderr.slice(0, 500)}")`);
       return buildResult('npm-outdated', 'npm outdated', 'N/A', [], Date.now() - start);
     }
 
@@ -70,6 +72,7 @@ export const npmOutdatedRunner: ToolRunner = {
     try {
       parsed = JSON.parse(stdout) as NpmOutdatedJson;
     } catch {
+      debugLog(options.verbose, `npm-outdated: JSON parse failed — stdout (${stdout.length} chars): ${stdout.slice(0, 1000)}`);
       return buildResult('npm-outdated', 'npm outdated', 'N/A', [], Date.now() - start);
     }
 
