@@ -87,10 +87,18 @@ export const consoleReporter: Reporter = {
 
 function printHeader(report: AuditReport): void {
   const { metadata } = report;
+  const boxWidth = 50;
+  const titleText = 'npm-goodjob \u2014 Audit Report';
+  const leftPad = Math.max(2, Math.floor((boxWidth - titleText.length) / 2));
+  const rightPad = boxWidth - titleText.length - leftPad;
+  const topBorder = `\u2554${'\u2550'.repeat(boxWidth)}\u2557`;
+  const titleBorder = `\u2551${' '.repeat(leftPad)}${titleText}${' '.repeat(rightPad)}\u2551`;
+  const bottomBorder = `\u255a${'\u2550'.repeat(boxWidth)}\u255d`;
+
   console.log('');
-  console.log(`${BOLD}╔══════════════════════════════════════════════════╗${RESET}`);
-  console.log(`${BOLD}║         npm-goodjob — Audit Report              ║${RESET}`);
-  console.log(`${BOLD}╚══════════════════════════════════════════════════╝${RESET}`);
+  console.log(`${BOLD}${topBorder}${RESET}`);
+  console.log(`${BOLD}${titleBorder}${RESET}`);
+  console.log(`${BOLD}${bottomBorder}${RESET}`);
   console.log('');
   console.log(`  ${DIM}Project:${RESET} ${BOLD}${metadata.projectName || '(unnamed)'}${RESET}`);
   console.log(`  ${DIM}Path:${RESET}    ${metadata.projectPath}`);
@@ -210,7 +218,7 @@ function printToolResult(result: ToolResult): void {
 
 function printFooter(report: AuditReport): void {
   const { summary, healthScore } = report;
-  console.log(`  ${BOLD}${'═'.repeat(46)}${RESET}`);
+  console.log(`  ${BOLD}${'═'.repeat(50)}${RESET}`);
 
   if (healthScore) {
     printHealthScore(healthScore);
@@ -240,6 +248,29 @@ function printHealthScore(hs: HealthScore): void {
 
   console.log(`  ${BOLD}Health Score:${RESET} ${color}${BOLD}${hs.total}/${max}${RESET}`);
   console.log(`  ${bar}`);
+
+  // Weighted penalty score
+  if (hs.weighted) {
+    const wPct = hs.weighted.score / 20;
+    const wColor = wPct >= 0.75 ? FG_GREEN : wPct >= 0.5 ? FG_YELLOW : FG_RED;
+    const wBarLen = 20;
+    const wFilled = Math.round(wPct * wBarLen);
+    const wEmpty = wBarLen - wFilled;
+    const wBar = `${wColor}${'█'.repeat(wFilled)}${DIM}${'░'.repeat(wEmpty)}${RESET}`;
+    console.log(`  ${DIM}Weighted:${RESET} ${wColor}${BOLD}${hs.weighted.score}/20${RESET}  ${wBar}`);
+    if (hs.weighted.penalties.length > 0) {
+      // Show top 5 worst penalties
+      const topPenalties = [...hs.weighted.penalties]
+        .sort((a, b) => b.penalty - a.penalty)
+        .slice(0, 5);
+      for (const p of topPenalties) {
+        console.log(`    ${FG_RED}-${p.penalty}${RESET} ${DIM}${p.label.slice(0, 60)}${RESET}`);
+      }
+      if (hs.weighted.penalties.length > 5) {
+        console.log(`    ${DIM}... and ${hs.weighted.penalties.length - 5} more penalties${RESET}`);
+      }
+    }
+  }
 
   for (const cat of hs.breakdown) {
     const catPct = cat.max > 0 ? cat.score / cat.max : 0;
