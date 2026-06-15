@@ -81,6 +81,8 @@ export const npmAuditRunner: ToolRunner = {
     const lockfilePath = resolve(projectPath, 'package-lock.json');
     const pkgJsonPath = resolve(projectPath, 'package.json');
 
+    debugLog(options.verbose, `[npm-audit] run() — platform=${process.platform} projectPath=${projectPath}`);
+
     if (!existsSync(pkgJsonPath)) {
       return skippedResult(
         'npm-audit',
@@ -111,7 +113,9 @@ export const npmAuditRunner: ToolRunner = {
     }
 
     // Run `npm audit --json`
+    debugLog(options.verbose, `[npm-audit] calling runToolCommand('npm', ['audit','--json'])`);
     const result = await runToolCommand('npm', ['audit', '--json'], options);
+    debugLog(options.verbose, `[npm-audit] runToolCommand returned — result=${result ? `ok (exit=${result.exitCode})` : 'null'}`);
 
     if (!result) {
       return errorResult('npm-audit', 'npm audit', 'Failed to run npm audit', Date.now() - start);
@@ -120,6 +124,10 @@ export const npmAuditRunner: ToolRunner = {
     // npm audit exits with code 1 when vulnerabilities are found — that is
     // expected behaviour, not a failure.  Parse whatever came back on stdout.
     const stdout = result.stdout.trim();
+    debugLog(options.verbose, `[npm-audit] stdout length=${stdout.length} exitCode=${result.exitCode}`);
+    if (result.stderr) {
+      debugLog(options.verbose, `[npm-audit] stderr: ${result.stderr.slice(0, 1000)}`);
+    }
     if (!stdout) {
       debugLog(options.verbose, `npm-audit: stdout empty (stderr: "${result.stderr.slice(0, 500)}")`);
       return buildResult('npm-audit', 'npm audit', npmVersion(), [], Date.now() - start);

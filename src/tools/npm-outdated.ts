@@ -42,6 +42,8 @@ export const npmOutdatedRunner: ToolRunner = {
     const pkg = readPackageJson(projectPath);
     const hasWorkspaces = Array.isArray(pkg.workspaces) || (typeof pkg.workspaces === 'object' && pkg.workspaces !== null);
 
+    debugLog(options.verbose, `[npm-outdated] run() — platform=${process.platform} projectPath=${projectPath}`);
+
     if (!pkg.dependencies && !pkg.devDependencies && !hasWorkspaces) {
       return skippedResult('npm-outdated', 'npm outdated', 'No dependencies found');
     }
@@ -55,7 +57,9 @@ export const npmOutdatedRunner: ToolRunner = {
       return skippedResult('npm-outdated', 'npm outdated', 'node_modules not found — run npm install first');
     }
 
+    debugLog(options.verbose, `[npm-outdated] calling runToolCommand`);
     const result = await runToolCommand('npm', ['outdated', '--json', '--long'], options);
+    debugLog(options.verbose, `[npm-outdated] runToolCommand returned — result=${result ? `ok (exit=${result.exitCode})` : 'null'}`);
 
     if (!result) {
       // npm outdated exits 1 when nothing is outdated
@@ -63,11 +67,11 @@ export const npmOutdatedRunner: ToolRunner = {
     }
 
     const stdout = result.stdout.trim();
+    debugLog(options.verbose, `[npm-outdated] stdout length=${stdout.length} exitCode=${result.exitCode}`);
     if (!stdout) {
       debugLog(options.verbose, `npm-outdated: stdout empty (stderr: "${result.stderr.slice(0, 500)}")`);
       return buildResult('npm-outdated', 'npm outdated', 'N/A', [], Date.now() - start);
     }
-
     let parsed: NpmOutdatedJson;
     try {
       parsed = JSON.parse(stdout) as NpmOutdatedJson;

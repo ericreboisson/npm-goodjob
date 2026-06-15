@@ -224,28 +224,36 @@ export async function runToolCommand(
   options: ToolOptions,
 ): Promise<CommandResult | null> {
   const resolvedBin = resolveBinaryPath(bin, options.projectPath);
-  debugLog(options.verbose, `exec: ${resolvedBin} ${args.join(' ')}`);
+  const isWin = process.platform === 'win32';
+  const cmdLabel = isWin ? `cmd /c ${resolvedBin}` : resolvedBin;
+  debugLog(options.verbose, `exec: ${cmdLabel} ${args.join(' ')}`);
   debugLog(options.verbose, `cwd: ${options.projectPath}`);
 
+  // On Windows, .cmd / .bat files (like npm.cmd) need shell:true so that
+  // Node.js spawns them via cmd.exe instead of trying to exec them directly.
+  const execOpts = {
+    cwd: options.projectPath,
+    encoding: 'utf-8' as const,
+    maxBuffer: 10 * 1024 * 1024,
+    shell: isWin,
+  };
+
   try {
-    const { stdout, stderr } = await execFileAsync(resolvedBin, args, {
-      cwd: options.projectPath,
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024, // 10 MB
-    });
-    verboseLog(options.verbose, `stdout (${stdout.length} chars):`, stdout.slice(0, 2000));
+    const { stdout, stderr } = await execFileAsync(resolvedBin, args, execOpts);
+    const trimmed = stdout.trim();
+    debugLog(options.verbose, `[tool-exec] exit 0 — stdout ${trimmed.length} chars`);
     if (stderr) verboseLog(options.verbose, `stderr:`, stderr.slice(0, 2000));
-    return { stdout, stderr, exitCode: 0 };
+    return { stdout: trimmed, stderr, exitCode: 0 };
   } catch (err: unknown) {
-    // child_process errors have stdout/stderr and code even on non-zero exit
     if (err && typeof err === 'object' && 'stdout' in err) {
-      const e = err as { stdout: string; stderr: string; code?: number };
-      verboseLog(options.verbose, `exit code ${e.code ?? 1}`);
-      verboseLog(options.verbose, `stdout (${e.stdout?.length ?? 0} chars):`, (e.stdout ?? '').slice(0, 2000));
+      const e = err as { stdout: string; stderr: string; code?: string | number };
+      const outTrimmed = (e.stdout ?? '').trim();
+      debugLog(options.verbose, `[tool-exec] exit ${e.code ?? 1} — stdout ${outTrimmed.length} chars`);
       if (e.stderr) verboseLog(options.verbose, `stderr:`, e.stderr.slice(0, 2000));
-      return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: e.code ?? 1 };
+      return { stdout: outTrimmed, stderr: e.stderr ?? '', exitCode: Number(e.code ?? 1) };
     }
-    debugLog(options.verbose, `exec failed: ${bin} — catastrophic error`, String(err));
+    const errMsg = (err instanceof Error) ? `${err.name}: ${err.message}` : String(err);
+    debugLog(options.verbose, `[tool-exec] catastrophic — ${errMsg}`);
     return null;
   }
 }
