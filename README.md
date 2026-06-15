@@ -17,7 +17,7 @@ npx npm-goodjob . --html-output audit.html
 ## Features
 
 | Capability | Description |
-|---|---|---|
+| --- | --- |
 | **17 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
 | **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
 | **Auto-fix** | `--fix` auto-fixes npm audit vulnerabilities, updates outdated deps, fixes package.json issues, dedupes lockfile |
@@ -122,7 +122,7 @@ npx npm-goodjob .
 ### Flags
 
 | Flag | Description |
-|---|---|---|
+| --- | --- |
 | `[project-path]` | Project to audit (default: `.`) |
 | `-t, --tools <tools...>` | Run only these tools (`--tools npm-audit eslint`) |
 | `-s, --skip <tools...>` | Skip these tools (`--skip ts-prune depcruise`) |
