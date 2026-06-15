@@ -3,8 +3,9 @@
 // Saves audit snapshots and compares against them to show trends.
 // ---------------------------------------------------------------------------
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import type { AuditReport, HealthScore } from './types.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AuditReport, HealthScore, IssueCategory } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,6 +27,20 @@ export interface BaselineReport {
   tools: Record<string, { issues: number; errors: number; warnings: number; critical: number; high: number }>;
 }
 
+export interface HistorySnapshot {
+  date: string;
+  projectPath: string;
+  healthScore: number;
+  weightedScore: number;
+  totals: {
+    total: number;
+    errors: number;
+    warnings: number;
+    info: number;
+    byCategory: Record<string, number>;
+  };
+}
+
 export interface DiffResult {
   health: { before: number; after: number; delta: number };
   summary: {
@@ -40,6 +55,9 @@ export interface DiffResult {
   removedTools: string[];
   healthScoreImproved: boolean;
   overallImproved: boolean;
+  newCves: string[];
+  categoryDeltas: Record<string, number>;
+  trend: HistorySnapshot[];
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +110,69 @@ export function loadBaseline(filePath: string): BaselineReport | null {
 }
 
 // ---------------------------------------------------------------------------
+// Run history (trend tracking)
+// ---------------------------------------------------------------------------
+
+function historyDir(projectPath: string): string {
+  const safe = projectPath.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_{2,}/g, '_');
+  return join(projectPath, '.goodjob-data', 'history', safe);
+}
+
+export function saveRunToHistory(report: AuditReport): void {
+  const dir = historyDir(report.metadata.projectPath);
+  mkdirSync(dir, { recursive: true });
+  const filePath = join(dir, 'history.ndjson');
+  const entry: HistorySnapshot = {
+    date: report.metadata.timestamp,
+    projectPath: report.metadata.projectPath,
+    healthScore: report.healthScore?.total ?? 0,
+    weightedScore: report.healthScore?.weighted?.score ?? report.healthScore?.total ?? 0,
+    totals: {
+      total: report.summary.total,
+      errors: report.summary.errors,
+      warnings: report.summary.warnings,
+      info: report.summary.info,
+      byCategory: { ...report.summary.byCategory },
+    },
+  };
+  writeFileSync(filePath, JSON.stringify(entry) + '\n', { flag: 'a' });
+  // Trim to last 30 entries
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const lines = raw.trim().split('\n');
+    if (lines.length > 30) {
+      writeFileSync(filePath, lines.slice(lines.length - 30).join('\n') + '\n', 'utf-8');
+    }
+  } catch { /* ignore */ }
+}
+
+export function loadRunHistory(projectPath: string, limit = 10): HistorySnapshot[] {
+  const dir = historyDir(projectPath);
+  const filePath = join(dir, 'history.ndjson');
+  if (!existsSync(filePath)) return [];
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const snapshots: HistorySnapshot[] = raw.trim().split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as HistorySnapshot);
+    return snapshots.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+export function computeTrend(history: HistorySnapshot[]): { direction: 'up' | 'down' | 'flat'; change: number } {
+  if (history.length < 2) return { direction: 'flat', change: 0 };
+  const first = history[0].weightedScore;
+  const last = history[history.length - 1].weightedScore;
+  const change = last - first;
+  return {
+    direction: change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat',
+    change,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Diff computation
 // ---------------------------------------------------------------------------
 
@@ -103,7 +184,6 @@ export function computeDiff(report: AuditReport, baseline: BaselineReport): Diff
   const baselineToolNames = new Set(Object.keys(baseline.tools));
   const currentToolNames = new Set(Object.keys(report.tools));
 
-  // Common tools
   for (const name of baselineToolNames) {
     const before = baseline.tools[name]?.issues ?? 0;
     const after = report.tools[name]?.issues.length ?? 0;
@@ -127,6 +207,35 @@ export function computeDiff(report: AuditReport, baseline: BaselineReport): Diff
     severity[sev] = { before, after, delta: after - before };
   }
 
+  const newCves: string[] = [];
+  const cveSeen = new Set<string>();
+  for (const toolResult of Object.values(report.tools)) {
+    for (const issue of toolResult.issues) {
+      if (issue.cve && !cveSeen.has(issue.cve)) {
+        cveSeen.add(issue.cve);
+        newCves.push(issue.cve);
+      }
+    }
+  }
+
+  // Category deltas
+  const allCategories = new Set([
+    ...Object.keys(baseline.summary.byCategory),
+    ...Object.keys(report.summary.byCategory),
+  ]);
+  const categoryDeltas: Record<string, number> = {};
+  for (const cat of allCategories) {
+    const catKey = cat as IssueCategory;
+    const before = baseline.summary.byCategory[catKey] ?? 0;
+    const after = report.summary.byCategory[catKey] ?? 0;
+    if (after !== before) {
+      categoryDeltas[cat] = after - before;
+    }
+  }
+
+  // Trend data
+  const trend = loadRunHistory(report.metadata.projectPath, 10);
+
   const totalDelta = report.summary.total - baseline.summary.total;
   const errorsDelta = report.summary.errors - baseline.summary.errors;
 
@@ -144,6 +253,9 @@ export function computeDiff(report: AuditReport, baseline: BaselineReport): Diff
     removedTools,
     healthScoreImproved: healthAfter > healthBefore,
     overallImproved: totalDelta <= 0 && errorsDelta <= 0 && healthAfter >= healthBefore,
+    newCves,
+    categoryDeltas,
+    trend,
   };
 }
 
@@ -193,6 +305,33 @@ export function formatDiff(diff: DiffResult): string {
     for (const name of diff.removedTools) {
       lines.push(`    ${name}: \x1b[31mREMOVED\x1b[0m`);
     }
+  }
+
+  // New CVEs
+  if (diff.newCves.length > 0) {
+    lines.push('');
+    lines.push(`  \x1b[33m\x1b[1mNew CVEs:\x1b[0m`);
+    for (const cve of diff.newCves) {
+      lines.push(`    \x1b[33m⚠ ${cve}\x1b[0m`);
+    }
+  }
+
+  // Category regressions
+  const regressedCats = Object.entries(diff.categoryDeltas).filter(([, d]) => d > 0);
+  if (regressedCats.length > 0) {
+    lines.push('');
+    lines.push(`  \x1b[31m\x1b[1mRegressions:\x1b[0m`);
+    for (const [cat, delta] of regressedCats) {
+      lines.push(`    \x1b[31m${cat}: +${delta}\x1b[0m`);
+    }
+  }
+
+  // Trend chart (sparkline)
+  if (diff.trend.length >= 2) {
+    const vals = diff.trend.map(s => s.weightedScore);
+    const trendDir = vals[vals.length - 1] > vals[0] ? '\x1b[32m↗\x1b[0m' : vals[vals.length - 1] < vals[0] ? '\x1b[31m↘\x1b[0m' : '\x1b[2m→\x1b[0m';
+    lines.push('');
+    lines.push(`  \x1b[1mTrend (last ${vals.length} runs):\x1b[0m ${trendDir}  ${vals.join(' → ')}`);
   }
 
   // Verdict

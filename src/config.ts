@@ -117,6 +117,7 @@ function mergeConfig(defaults: GoodjobConfig, overrides: Partial<GoodjobConfig>)
     },
     pkgLint: overrides.pkgLint ?? defaults.pkgLint,
     projects: overrides.projects ?? defaults.projects,
+    issues: overrides.issues ?? defaults.issues,
   };
 }
 

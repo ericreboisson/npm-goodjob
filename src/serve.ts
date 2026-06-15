@@ -3,13 +3,15 @@
 // ---------------------------------------------------------------------------
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { spawn } from 'node:child_process';
-import type { DashboardReport } from './types.js';
+import type { AuditReport, DashboardReport } from './types.js';
 import { getHistoryIndex, loadRunData, saveRun, type HistoryEntry } from './history.js';
-import { loadProjects, runDashboard } from './dashboard.js';
+import { loadProjects, runDashboard, resolveRemoteProject } from './dashboard.js';
 import { loadConfig } from './config.js';
 import { GOODJOB_VERSION } from './runner.js';
+import { renderHtml } from './reporters/html-reporter.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,7 +111,30 @@ function serveHtml(res: ServerResponse, _port: number): void {
   .badge-yellow { background: rgba(234, 179, 8, 0.2); color: #facc15; }
   .badge-red { background: rgba(220, 38, 38, 0.2); color: #f87171; }
 
+  /* Loading state */
   .loading { text-align: center; padding: 40px; color: #94a3b8; }
+  .loading-row td { text-align: center; padding: 32px; }
+  .loading-row .mini-spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 3px solid #334155; border-top: 3px solid #38bdf8;
+    border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: middle; margin-right: 10px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-overlay {
+    position: fixed; inset: 0; background: #0f172a; z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: opacity .5s ease;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-overlay .spinner {
+    width: 44px; height: 44px;
+    border: 4px solid #334155; border-top: 4px solid #38bdf8;
+    border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 20px;
+  }
+  .loading-overlay .loading-title { color: #e2e8f0; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .loading-overlay .loading-sub { color: #64748b; font-size: 13px; }
 
   .error-container {
     background: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.3);
@@ -144,6 +169,12 @@ function serveHtml(res: ServerResponse, _port: number): void {
   </div>
 </nav>
 
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-title">Running audit…</div>
+  <div class="loading-sub" id="loadingDetail">Initializing tools</div>
+</div>
+
 <div class="container">
   <div id="errorContainer" class="error-container" style="display:none">
     <h3 id="errorTitle">Error</h3>
@@ -172,19 +203,26 @@ function serveHtml(res: ServerResponse, _port: number): void {
 
   <div class="card">
     <h2>Run History</h2>
+    <p style="font-size:12px;color:#64748b;margin-bottom:12px;">
+      Each row is an audit run triggered manually or on server start.
+      Click <strong>Run Audit</strong> to trigger a new scan.
+      Health score is the flat /20 score.
+      The timeline chart above plots health % over time.
+    </p>
     <table>
       <thead>
         <tr>
+          <th>Age</th>
           <th>Timestamp</th>
           <th>Project</th>
           <th class="text-right">Total</th>
-          <th class="text-right">Errors</th>
+          <th class="text-right" title="Error-level issues (critical & high severity)">Errors</th>
           <th class="text-right">Warnings</th>
           <th class="text-right">Health</th>
         </tr>
       </thead>
       <tbody id="historyBody">
-        <tr><td colspan="6" class="loading">Loading...</td></tr>
+        <tr class="loading-row"><td colspan="7"><span class="mini-spinner"></span>Loading audit results…</td></tr>
       </tbody>
     </table>
   </div>
@@ -331,24 +369,42 @@ function drawTimeline(history) {
 function populateHistory(history) {
   const tbody = document.getElementById('historyBody');
   if (!history.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="loading">No runs yet. Click "Run Audit" to start.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">No runs yet. Click "Run Audit" to start.</td></tr>';
     return;
   }
 
   tbody.innerHTML = history.slice(0, 50).map((r) => {
     const d = new Date(r.timestamp);
     const ts = d.toLocaleString();
+    const age = relativeTime(d);
     const hs = r.healthScore ? r.healthScore.total + '/' + r.healthScore.max : '--';
     const badge = r.errors > 0 ? 'badge-red' : r.warnings > 0 ? 'badge-yellow' : 'badge-green';
     return '<tr>' +
+      '<td style="white-space:nowrap;color:#94a3b8;font-size:12px;">' + age + '</td>' +
       '<td>' + ts + '</td>' +
-      '<td>' + esc(r.projectName) + '</td>' +
+      '<td title="' + esc(r.projectPath) + '" style="cursor:help;">' + esc(r.projectName) + '</td>' +
       '<td class="text-right">' + r.total + '</td>' +
       '<td class="text-right"><span class="badge ' + badge + '">' + r.errors + '</span></td>' +
       '<td class="text-right">' + r.warnings + '</td>' +
       '<td class="text-right">' + hs + '</td>' +
       '</tr>';
   }).join('');
+}
+
+function relativeTime(date) {
+  const diff = Date.now() - date.getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 10) return 'just now';
+  if (sec < 60) return sec + 's ago';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm ago';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + 'h ago';
+  const day = Math.floor(hr / 24);
+  if (day < 30) return day + 'd ago';
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return mo + 'mo ago';
+  return Math.floor(day / 365) + 'y ago';
 }
 
 function esc(s) {
@@ -368,13 +424,16 @@ function updateProjects(projects) {
   const errors = projects.filter(p => p.status === 'error');
 
   container.innerHTML = '<div class="card"><h2>Projects</h2>';
-  projects.forEach(p => {
+  projects.forEach((p, idx) => {
     const cls = p.status === 'error' ? 'badge-red' : 'badge-green';
     const label = p.status === 'error' ? 'ERROR' : 'OK';
     container.innerHTML += '<div class="project-card">' +
       '<div class="project-header">' +
         '<div><div class="project-name">' + esc(p.name) + '</div><div class="project-path">' + esc(p.path) + '</div></div>' +
-        '<div><span class="badge ' + cls + '">' + label + '</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          (p.report ? '<a href="/report/' + idx + '" target="_blank" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;text-decoration:none;">📄 Full Report</a>' : '') +
+          '<span class="badge ' + cls + '">' + label + '</span>' +
+        '</div>' +
       '</div>';
     if (p.status === 'error') {
       container.innerHTML += '<div style="color:#f87171;margin-top:8px;font-size:13px">' + esc(p.error || 'Unknown error') + '</div>';
@@ -393,10 +452,30 @@ function updateProjects(projects) {
 }
 
 // Main refresh
+function showLoadingOverlay(detail) {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    document.getElementById('loadingDetail').textContent = detail || 'Initializing tools';
+  }
+}
+function hideLoadingOverlay() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
 async function refreshDashboard() {
   try {
     const data = await api('/api/dashboard');
     const dr = data.dashboard;
+
+    if (!dr) {
+      // Audit still running (initial refresh not complete), retry in 2s
+      showLoadingOverlay('Audit in progress, please wait…');
+      setTimeout(refreshDashboard, 2000);
+      return;
+    }
+    hideLoadingOverlay();
 
     if (dr.summary) {
       updateStats(dr);
@@ -418,12 +497,14 @@ async function refreshDashboard() {
 
     updateProjects(dr.projects || []);
   } catch (err) {
+    hideLoadingOverlay();
     showError('Failed to load dashboard', err.message);
   }
 }
 
 // Run audit
 async function runAudit() {
+  showLoadingOverlay('Running audit…');
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
   btn.textContent = 'Running...';
@@ -475,6 +556,21 @@ export function stopServer(): void {
   }
 }
 
+// Find the run immediately before the given timestamp for this project
+function findPreviousRun(projectPath: string, currentTimestamp: string): AuditReport | null {
+  try {
+    const idx = getHistoryIndex(projectPath);
+    const curIdx = idx.runs.findIndex(r => r.timestamp === currentTimestamp);
+    if (curIdx < 0 || curIdx + 1 >= idx.runs.length) return null;
+    return loadRunData(projectPath, idx.runs[curIdx + 1].id);
+  } catch { return null; }
+}
+
+// Stable signature for deduplicating issues across runs
+function issueSignature(iss: { cve?: string; package?: string; fixVersion?: string; version?: string; file?: string; line?: number; message: string }): string {
+  return iss.cve || (iss.package + '|' + (iss.fixVersion || iss.version || '')) || (iss.file + '|' + (iss.line || '') + '|' + iss.message);
+}
+
 export async function startServer(options: ServeOptions = {}): Promise<void> {
   const port = options.port ?? 3333;
   const projectPath = options.projectPath ?? resolve(process.cwd());
@@ -483,33 +579,60 @@ export async function startServer(options: ServeOptions = {}): Promise<void> {
   const config = loadConfig(projectPath);
   let projects = loadProjects(config, projectPath);
 
-  // If no projects configured, treat the current path as a single project
   if (projects.length === 0) {
-    // We derive the name from the directory
-    const dirName = projectPath.split(/[/\\]/).pop() ?? 'project';
-    projects = [{ name: dirName, path: projectPath }];
+    try {
+      const entries = readdirSync(projectPath);
+      for (const entry of entries) {
+        const fullPath = join(projectPath, entry);
+        if (statSync(fullPath).isDirectory() && !entry.startsWith('.') && entry !== 'node_modules') {
+          if (existsSync(join(fullPath, 'package.json'))) {
+            projects.push({ name: entry, path: fullPath });
+          }
+        }
+      }
+    } catch { /* ok */ }
+    if (projects.length === 0) {
+      const dirName = projectPath.split(/[/\\]/).pop() ?? 'project';
+      projects = [{ name: dirName, path: projectPath }];
+    }
   }
+
+  // Resolve remote projects (clone GitHub repos into local cache)
+  projects = projects.map((p) => resolveRemoteProject(p, projectPath));
 
   // Cached latest dashboard report
   let latestDashboard: DashboardReport | null = null;
   let latestError: string | null = null;
+  let refreshing = false;
 
   async function refreshDashboardData(): Promise<void> {
+    if (refreshing) return;
+    refreshing = true;
+    const auditStart = Date.now();
+    const names = projects.map((p) => p.name).join(', ');
+    console.error(`  \u{23F3} Running audit for ${projects.length} project(s): ${names}...`);
     try {
       latestError = null;
       latestDashboard = await runDashboard(projects, { toolTimeoutMs: 180_000 });
-      // Save each successful project to history
       for (const entry of latestDashboard.projects) {
         if (entry.report) {
           saveRun(entry.report, entry.path);
+          const hs = entry.report.healthScore
+            ? `${entry.report.healthScore.total}/${entry.report.healthScore.max}`
+            : '--';
+          console.error(`  \u{2705} ${entry.name}: ${entry.report.summary.total} issues (${entry.report.summary.errors} errors) — health ${hs} (${Math.round((Date.now() - auditStart) / 1000)}s)`);
+        } else if (entry.status === 'error') {
+          console.error(`  \u{274C} ${entry.name}: ERROR — ${entry.error}`);
         }
       }
     } catch (err) {
       latestError = err instanceof Error ? err.message : String(err);
+      console.error(`  \u{274C} Audit failed: ${latestError}`);
+    } finally {
+      refreshing = false;
     }
   }
 
-  // Initial audit on startup
   serverInstance = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const { pathname } = parseUrl(req);
     const method = (req.method ?? 'GET').toUpperCase();
@@ -551,7 +674,9 @@ export async function startServer(options: ServeOptions = {}): Promise<void> {
       }
 
       if (pathname === '/api/run' && method === 'POST') {
-        // Trigger audit (non-blocking refresh, but wait for it)
+        while (refreshing) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
         await refreshDashboardData();
         jsonResponse(res, {
           success: true,
@@ -561,8 +686,8 @@ export async function startServer(options: ServeOptions = {}): Promise<void> {
       }
 
       if (pathname === '/api/dashboard') {
-        if (!latestDashboard && !latestError) {
-          await refreshDashboardData();
+        if (!latestDashboard && !latestError && !refreshing) {
+          refreshDashboardData().catch(() => {});
         }
         jsonResponse(res, {
           dashboard: latestDashboard,
@@ -573,7 +698,6 @@ export async function startServer(options: ServeOptions = {}): Promise<void> {
 
       if (pathname.startsWith('/api/history/')) {
         const id = pathname.replace('/api/history/', '');
-        // Search across all projects
         for (const p of projects) {
           const report = loadRunData(p.path, id);
           if (report) {
@@ -585,20 +709,50 @@ export async function startServer(options: ServeOptions = {}): Promise<void> {
         return;
       }
 
-      // HTML page (default)
+      const reportMatch = pathname.match(/^\/report\/(\d+)$/);
+      if (reportMatch) {
+        const idx = parseInt(reportMatch[1], 10);
+        if (latestDashboard && idx >= 0 && idx < latestDashboard.projects.length) {
+          const entry = latestDashboard.projects[idx];
+          if (entry.report) {
+            // Flag regressions: compare with previous run for this project
+            const prevRun = findPreviousRun(entry.path, entry.report.metadata.timestamp);
+            if (prevRun) {
+              const prevSignatures = new Set();
+              for (const t of Object.values(prevRun.tools)) {
+                for (const iss of t.issues) {
+                  prevSignatures.add(issueSignature(iss));
+                }
+              }
+              for (const t of Object.values(entry.report.tools)) {
+                for (const iss of t.issues) {
+                  if (!prevSignatures.has(issueSignature(iss))) {
+                    (iss as any).isNew = true;
+                  }
+                }
+              }
+            }
+            const html = renderHtml(entry.report);
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(html);
+            return;
+          }
+        }
+        errorResponse(res, 'Report not found', 404);
+        return;
+      }
+
       if (pathname === '/' || pathname === '/dashboard') {
         serveHtml(res, port);
         return;
       }
 
-      // 404
       errorResponse(res, 'Not found', 404);
     } catch (err) {
       errorResponse(res, err instanceof Error ? err.message : String(err));
     }
   });
 
-  // Start initial refresh (don't await — let server start first)
   refreshDashboardData().catch(() => {});
 
   return new Promise<void>((resolvePromise) => {

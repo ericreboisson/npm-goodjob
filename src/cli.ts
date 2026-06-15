@@ -4,23 +4,25 @@
 
 import { execSync } from 'node:child_process';
 import { Command } from 'commander';
-import { existsSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { getAllTools } from './tools/base.js';
 import './tools/index.js'; // side-effect: register all tools
-import { runAudit, GOODJOB_VERSION } from './runner.js';
+import { loadConfig } from './config.js';
+import { runAudit, runMonorepoAudit, GOODJOB_VERSION } from './runner.js';
+import { isStrictPass } from './health-score.js';
 import { isGitUrl, cloneRepoAsync } from './git-clone.js';
 import { consoleReporter } from './reporters/console-reporter.js';
 import { jsonReporter, writeJsonFile } from './reporters/json-reporter.js';
 import { htmlReporter, writeHtmlFile } from './reporters/html-reporter.js';
 import { sarifReporter, writeSarifFile } from './reporters/sarif-reporter.js';
-import { storeBaseline, loadBaseline, computeDiff, formatDiff, baselineSummary } from './baseline.js';
+import { storeBaseline, loadBaseline, computeDiff, formatDiff, baselineSummary, saveRunToHistory, loadRunHistory, computeTrend } from './baseline.js';
 import { formatSbomOutput } from './sbom.js';
 import { postPrComment, formatPrComment } from './pr-comment.js';
 import { runTui } from './tui.js';
 import { runFix, formatFixOutput } from './fix.js';
-import { loadProjects, runDashboard } from './dashboard.js';
+import { loadProjects, runDashboard, resolveRemoteProject } from './dashboard.js';
 import { writeDashboardConsole } from './reporters/dashboard-console-reporter.js';
 import { writeDashboardHtmlFile } from './reporters/html-dashboard-reporter.js';
 
@@ -594,6 +596,32 @@ export async function runCLI(): Promise<void> {
       const report = await runAudit({ projectPath: basePath });
       const diff = computeDiff(report, baselineData);
       process.stdout.write(formatDiff(diff));
+      saveRunToHistory(report);
+    });
+
+  baseline
+    .command('trend [project-path]')
+    .description('Show health score trend from run history')
+    .action(async (projectPath) => {
+      const basePath = await resolveTargetPath(projectPath);
+      const history = loadRunHistory(basePath, 15);
+      if (history.length === 0) {
+        console.error(`\n  ${FG_YELLOW}No run history found for ${BOLD}${basePath}${RESET}`);
+        console.error(`  Run audits normally to build history.\n`);
+        return;
+      }
+      const trend = computeTrend(history);
+      const directionIcon = trend.direction === 'up' ? '↗' : trend.direction === 'down' ? '↘' : '→';
+      const dirColor = trend.direction === 'up' ? FG_GREEN : trend.direction === 'down' ? FG_RED : DIM;
+      console.error(`\n  ${BOLD}Health Score Trend${RESET} ${DIM}(last ${history.length} runs)${RESET}`);
+      console.error(`  ${'─'.repeat(48)}`);
+      for (const snap of history) {
+        const date = snap.date.slice(0, 16).replace('T', ' ');
+        console.error(`  ${date}  ${snap.weightedScore}/20  ${snap.totals.total} issues`);
+      }
+      console.error(`  ${'─'.repeat(48)}`);
+      console.error(`  Direction: ${dirColor}${directionIcon} ${trend.change > 0 ? '+' : ''}${trend.change}${RESET}`);
+      console.error('');
     });
 
   // -----------------------------------------------------------------------
@@ -640,9 +668,9 @@ export async function runCLI(): Promise<void> {
     .option('--timeout <ms>', 'Per-project tool timeout in milliseconds', '180000')
     .action(async (options) => {
       const cwd = process.cwd();
-      const { loadConfig } = await import('./config.js');
       const config = loadConfig(cwd);
-      const projects = loadProjects(config, cwd);
+      let projects = loadProjects(config, cwd);
+      projects = projects.map((p) => resolveRemoteProject(p, cwd));
 
       if (projects.length === 0) {
         console.error(`\n  ${FG_YELLOW}No projects configured.${RESET}`);
@@ -698,6 +726,44 @@ export async function runCLI(): Promise<void> {
     });
 
   // -----------------------------------------------------------------------
+  // Subcommand: clean — remove audit artifacts
+  // -----------------------------------------------------------------------
+  program
+    .command('clean [project-path]')
+    .description('Remove audit artifacts (.goodjob-data/, .goodjob-cache) from a project')
+    .option('--all', 'Also remove .goodjobrc configuration file')
+    .action((projectPath, options) => {
+      const basePath = resolve(process.cwd(), projectPath ?? '.');
+      let removed = 0;
+
+      for (const dir of ['.goodjob-data', '.goodjob-cache']) {
+        const d = join(basePath, dir);
+        if (existsSync(d)) {
+          rmSync(d, { recursive: true, force: true });
+          console.error(`  ${FG_GREEN}✓${RESET} Removed ${BOLD}${dir}/${RESET}`);
+          removed++;
+        }
+      }
+
+      if (options.all) {
+        for (const name of ['.goodjobrc', '.goodjobrc.json', 'goodjob.config.json']) {
+          const rcPath = join(basePath, name);
+          if (existsSync(rcPath)) {
+            rmSync(rcPath);
+            console.error(`  ${FG_GREEN}✓${RESET} Removed ${BOLD}${name}${RESET}`);
+            removed++;
+          }
+        }
+      }
+
+      if (removed === 0) {
+        console.error(`  ${FG_YELLOW}No audit artifacts found for${RESET} ${BOLD}${basePath}${RESET}`);
+      } else {
+        console.error(`  ${FG_GREEN}✓${RESET} Cleaned ${removed} item${removed > 1 ? 's' : ''}.`);
+      }
+    });
+
+  // -----------------------------------------------------------------------
   // Main audit command (default — no matching subcommand)
   // -----------------------------------------------------------------------
   program
@@ -716,18 +782,26 @@ export async function runCLI(): Promise<void> {
     .option('--no-cache', 'Disable result caching (slower but always fresh)')
     .option('--fix', 'Auto-fix fixable issues (npm audit fix, npm update outdated)')
     .option('--timeout <ms>', 'Per-tool timeout in milliseconds', '120000')
+    .option('--fast', 'Built-in tools only (architect, secret-scanning, lockfile, deps) — no npx, quick')
+    .option('--strict', 'Exit with code 1 if weighted health score < 15 (configurable in .goodjobrc)')
+    .option('--dry-run', 'Load tool results from pre-recorded snapshots (no real tool execution)')
+    .option('--record', 'Run real tools and save results as snapshots for future --dry-run')
     .action(async (projectPath, opts) => {
       const resolvedPath = await resolveTargetPath(projectPath);
 
       // Live progress tracker
       const progress = new ProgressTracker();
 
-      const report = await runAudit({
+      const report = await runMonorepoAudit({
         projectPath: resolvedPath,
         tools: opts.tools,
         skipTools: opts.skip,
         verbose: opts.verbose ?? false,
         noCache: opts.cache === false,
+        fast: opts.fast ?? false,
+        strict: opts.strict ?? false,
+        dryRun: opts.dryRun ?? false,
+        record: opts.record ?? false,
         toolTimeoutMs: parseInt(opts.timeout, 10) || 120_000,
         onToolStart(name, label) {
           progress.start(name, label);
@@ -736,6 +810,8 @@ export async function runCLI(): Promise<void> {
           progress.complete(name, label, status, durationMs, issueCount);
         },
       });
+
+      saveRunToHistory(report);
 
       // Route output format
       const jsonOutputFile = opts.output as string | undefined;
@@ -773,6 +849,18 @@ export async function runCLI(): Promise<void> {
       // Auto-fix if requested
       if (opts.fix) {
         process.stderr.write(formatFixOutput(runFix(resolvedPath)));
+      }
+
+      // --strict: exit 1 if weighted health score < threshold
+      if (opts.strict) {
+        const config = loadConfig(resolvedPath);
+        if (!isStrictPass(report, config)) {
+          const threshold = config?.healthScore?.thresholds?.strict ?? 15;
+          const weighted = report.healthScore?.weighted?.score ?? report.healthScore?.total ?? 20;
+          consoleReporter.write(report);
+          process.stderr.write(`\n  ${FG_RED}${BOLD}✗ --strict: weighted health score ${weighted}/20 < ${threshold}${RESET}\n\n`);
+          process.exit(1);
+        }
       }
 
       // Exit code: error-level issues → exit 1

@@ -95,6 +95,11 @@ export interface HealthScore {
     max: number;
     detail: string;
   }>;
+  /** Severity-weighted penalty score (20 - sum of penalties) */
+  weighted: {
+    score: number;
+    penalties: WeightedPenalty[];
+  };
 }
 
 /** Aggregated report — the top-level output */
@@ -124,6 +129,13 @@ export interface AuditReport {
   };
   /** Health score (optional, computed post-hoc) */
   healthScore?: HealthScore;
+}
+
+/** Weighted penalty entry for health score breakdown */
+export interface WeightedPenalty {
+  label: string;
+  penalty: number;
+  detail: string;
 }
 
 /** A single policy rule: e.g. "health < 14" or "severity.critical > 0" */
@@ -193,6 +205,8 @@ export interface DashboardReport {
     errors: number;
     warnings: number;
     info: number;
+    /** Count by severity across all projects */
+    bySeverity?: Record<string, number>;
   };
 }
 
@@ -213,6 +227,8 @@ export interface GoodjobConfig {
     thresholds?: {
       good?: number;
       warning?: number;
+      /** --strict exit code threshold (default 15) */
+      strict?: number;
     };
   };
   tools?: {
@@ -232,6 +248,17 @@ export interface GoodjobConfig {
   pkgLint?: PkgLintConfig;
   /** Multi-project dashboard config */
   projects?: DashboardProject[];
+  /** Issue exclusions — patterns that suppress matching issues from the report */
+  issues?: {
+    ignored?: Array<{
+      tool?: string;
+      package?: string;
+      message?: string;
+      severity?: 'critical' | 'high' | 'medium' | 'low';
+      category?: IssueCategory;
+      reason?: string;
+    }>;
+  };
 }
 
 export interface PkgLintConfig {
