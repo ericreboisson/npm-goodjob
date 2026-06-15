@@ -27,6 +27,14 @@ interface DepcheckResult {
   invalidDirs: Record<string, string>;
 }
 
+const DEFAULT_IGNORE_MATCHES = [
+  '@angular/compiler-cli',
+  '@angular-devkit/*',
+  'typescript',
+  'ts-node',
+  'tslib',
+];
+
 export const depcheckRunner: ToolRunner = {
   name: 'depcheck',
   label: 'depcheck',
@@ -57,13 +65,7 @@ export const depcheckRunner: ToolRunner = {
         const result = await depcheckFn(options.projectPath, {
           ignoreBinPackage: false,
           skipMissing: false,
-          ignoreMatches: [
-            '@angular/compiler-cli',
-            '@angular-devkit/*',
-            'typescript',
-            'ts-node',
-            'tslib',
-          ],
+          ignoreMatches: DEFAULT_IGNORE_MATCHES,
         });
 
         const issues = buildDepcheckIssues(result);
@@ -83,9 +85,12 @@ export const depcheckRunner: ToolRunner = {
       );
     }
 
+    const cliArgs = ['--json'];
+    cliArgs.push('--ignores', DEFAULT_IGNORE_MATCHES.join(','));
+
     const result = useNpx
-      ? await runNpxToolCommand('depcheck', ['--json'], options)
-      : await runToolCommand('depcheck', ['--json'], options);
+      ? await runNpxToolCommand('depcheck', cliArgs, options)
+      : await runToolCommand('depcheck', cliArgs, options);
 
     if (!result) {
       return {

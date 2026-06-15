@@ -231,6 +231,7 @@ const DEFAULT_SKIP_DIRS = new Set([
   'dist', 'build', '.cache', 'coverage', '.nyc_output',
   '__pycache__', '.tox', 'vendor', '.gradle', 'target',
   'bin', 'obj', '.serverless', '.terraform',
+  '.angular',
 ]);
 
 const TEXT_EXTENSIONS = new Set([

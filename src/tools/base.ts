@@ -38,6 +38,12 @@ export interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
+  private?: boolean;
+  type?: string;
+  workspaces?: string[] | { packages: string[] };
+  engines?: { node?: string; npm?: string; [key: string]: unknown };
+  main?: string;
+  exports?: Record<string, unknown> | string;
   [key: string]: unknown;
 }
 

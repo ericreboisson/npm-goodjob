@@ -39,8 +39,9 @@ export const npmOutdatedRunner: ToolRunner = {
     const start = Date.now();
     const projectPath = options.projectPath;
     const pkg = readPackageJson(projectPath);
+    const hasWorkspaces = Array.isArray(pkg.workspaces) || (typeof pkg.workspaces === 'object' && pkg.workspaces !== null);
 
-    if (!pkg.dependencies && !pkg.devDependencies) {
+    if (!pkg.dependencies && !pkg.devDependencies && !hasWorkspaces) {
       return skippedResult('npm-outdated', 'npm outdated', 'No dependencies found');
     }
 

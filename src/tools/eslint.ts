@@ -21,6 +21,16 @@ import {
   getBinaryVersion,
 } from './base.js';
 
+const IGNORE_PATTERNS = [
+  '.angular/**',
+  '.cache/**',
+  'dist/**',
+  'build/**',
+  'coverage/**',
+  '.next/**',
+  '.goodjob-*/**',
+];
+
 interface LintMessage {
   ruleId: string | null;
   severity: 1 | 2;
@@ -216,6 +226,10 @@ export const eslintRunner: ToolRunner = {
       }
       writeFileSync(tempConfigPath, generateFlatConfig(tsDepsDir), 'utf-8');
       cmdArgs = ['.', '--config', '.goodjob-eslintrc.mjs', '--format', 'json', '--no-color'];
+    }
+
+    for (const p of IGNORE_PATTERNS) {
+      cmdArgs.push('--ignore-pattern', p);
     }
 
     const result = useNpx

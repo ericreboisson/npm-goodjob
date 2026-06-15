@@ -4,8 +4,8 @@
 // Auto-generates a TypeScript-aware config when tsconfig.json is present.
 // ---------------------------------------------------------------------------
 
-import { existsSync, writeFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import type { ToolRunner, Issue, ToolOptions, ToolResult } from '../types.ts';
 import {
   registerTool,
@@ -67,7 +67,40 @@ export const depcruiseRunner: ToolRunner = {
     const tempConfigPath = resolve(options.projectPath, '.goodjob-depcruise.mjs');
     let generatedTempConfig = false;
 
-    const args: string[] = ['src'];
+    const projectSrc = resolve(options.projectPath, 'src');
+    const srcDirs: string[] = [];
+    if (existsSync(projectSrc)) {
+      srcDirs.push('src');
+    } else {
+      try {
+        const pkgPath = resolve(options.projectPath, 'package.json');
+        if (existsSync(pkgPath)) {
+          const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+          const workspaces: string[] = Array.isArray(pkg.workspaces)
+            ? pkg.workspaces as string[]
+            : typeof pkg.workspaces === 'object' && pkg.workspaces !== null
+                ? Object.values(pkg.workspaces).flat() as string[]
+                : [];
+          for (const ws of workspaces) {
+            if (ws.includes('*')) {
+              const baseDir = ws.replace(/\/?\*+$/, '');
+              const basePath = resolve(options.projectPath, baseDir);
+              if (existsSync(basePath)) {
+                for (const entry of readdirSync(basePath, { withFileTypes: true })) {
+                  if (entry.isDirectory() && existsSync(resolve(basePath, entry.name, 'src'))) {
+                    srcDirs.push(join(baseDir, entry.name, 'src'));
+                  }
+                }
+              }
+            } else if (existsSync(resolve(options.projectPath, ws, 'src'))) {
+              srcDirs.push(join(ws, 'src'));
+            }
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
+    const args: string[] = srcDirs.length > 0 ? [...srcDirs] : ['.'];
 
     if (!hasConfig) {
       if (hasTsConfig) {

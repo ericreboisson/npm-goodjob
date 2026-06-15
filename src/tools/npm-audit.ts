@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
-// npm-goodjob — npm audit runner
-// ---------------------------------------------------------------------------
+
 
 import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -21,6 +19,7 @@ import {
  *  vulnerabilities and advisories) */
 interface Advisory {
   title: string;
+  description?: string;
   url?: string;
   severity?: string;
   cwe?: string[];
@@ -34,6 +33,8 @@ interface Vulnerability {
   range: string;
   via: Array<Advisory | string>;
   fixAvailable: boolean | { name: string; version: string };
+  path?: string[];
+  nodes?: string[];
 }
 
 interface NpmAuditJson {
@@ -160,53 +161,84 @@ export const npmAuditRunner: ToolRunner = {
       if (v) installedVersions.set(pkgName, v);
     }
 
-    // Parse vulnerabilities
     for (const [pkgName, vuln] of Object.entries(vulns)) {
       const installed = installedVersions.get(pkgName);
 
-      for (const via of vuln.via) {
-        const adv: Advisory = typeof via === 'string' ? { title: via } : via;
-        const cweInfo = adv.cwe?.length ? adv.cwe.join(', ') : '';
-        const cvssInfo = adv.cvss?.score != null ? `CVSS ${adv.cvss.score}` : '';
+      const advisoryRefs = vuln.via.filter(v => typeof v !== 'string') as Advisory[];
+      const depChain = vuln.via.filter(v => typeof v === 'string') as string[];
 
-        // Build a rich description
-        const detailParts: string[] = [];
-        if (adv.range) detailParts.push(`Affects ${adv.range}`);
-        else detailParts.push(`Affects versions ${vuln.range}`);
-        if (cweInfo) detailParts.push(cweInfo);
-        if (cvssInfo) detailParts.push(cvssInfo);
-        if (vuln.fixAvailable) {
-          detailParts.push(
-            typeof vuln.fixAvailable === 'object'
-              ? `Fix: ${vuln.fixAvailable.name}@${vuln.fixAvailable.version}`
-              : 'Fix available via npm audit fix',
-          );
-        } else {
-          detailParts.push('No fix available');
-        }
-        if (adv.url) detailParts.push(adv.url);
+      const advisory = advisoryRefs
+        .slice()
+        .sort((a, b) => ((b.cvss?.score ?? 0) - (a.cvss?.score ?? 0)) || ((b.cwe?.length ?? 0) - (a.cwe?.length ?? 0)))
+        [advisoryRefs.length - 1]
+        ?? (advisoryRefs.length > 0 ? advisoryRefs[advisoryRefs.length - 1] : undefined);
 
-        issues.push({
-          level: vuln.severity === 'critical' || vuln.severity === 'high' ? 'error' : 'warning',
-          tool: 'npm-audit',
-          category: 'security',
-          severity: vuln.severity === 'critical'
-            ? 'critical'
-            : vuln.severity === 'high'
-              ? 'high'
-              : vuln.severity === 'moderate'
-                ? 'medium'
-                : 'low',
-          message: installed
-            ? `${pkgName}@${installed}: ${adv.title}`
-            : `${pkgName}: ${adv.title}`,
-          detail: detailParts.join(' · '),
-          package: pkgName,
-          version: installed,
-          cve: cweInfo || undefined,
-          advisory: adv.url,
-        });
+      const nodePath = vuln.nodes?.join('\n  ') ?? (vuln.path ? `node_modules/${vuln.path.join('\n  node_modules/')}` : undefined);
+
+      const detailLines: string[] = [];
+
+      if (advisory?.description) {
+        detailLines.push(advisory.description);
+      } else if (advisory?.title && advisory.title !== pkgName) {
+        detailLines.push(advisory.title);
       }
+
+      if (advisory?.url) {
+        detailLines.push(`Advisory: ${advisory.url}`);
+      }
+
+      if (depChain.length > 0) {
+        const depPathStr = vuln.path
+          ? vuln.path.join(' → ')
+          : depChain.join(' → ');
+        detailLines.push(`Depends on: ${depPathStr} (vulnerable)`);
+      }
+
+      if (advisory?.range) {
+        detailLines.push(`Affects: ${advisory.range}`);
+      } else {
+        detailLines.push(`Affects: ${vuln.range}`);
+      }
+
+      const cvssScore = advisory?.cvss?.score;
+      if (cvssScore != null) detailLines.push(`CVSS: ${cvssScore}`);
+      if (advisory?.cwe?.length) detailLines.push(`CWE: ${advisory.cwe.join(', ')}`);
+
+      if (vuln.fixAvailable) {
+        if (typeof vuln.fixAvailable === 'object') {
+          detailLines.push(`Fix: npm install ${vuln.fixAvailable.name}@${vuln.fixAvailable.version}`);
+        } else {
+          detailLines.push('Fix: npm audit fix');
+        }
+      } else {
+        detailLines.push('No fix available');
+      }
+
+      if (nodePath) {
+        detailLines.push(`Path: ${nodePath}`);
+      }
+
+      issues.push({
+        level: vuln.severity === 'critical' || vuln.severity === 'high' ? 'error' : 'warning',
+        tool: 'npm-audit',
+        category: 'security',
+        severity: vuln.severity === 'critical'
+          ? 'critical'
+          : vuln.severity === 'high'
+            ? 'high'
+            : vuln.severity === 'moderate'
+              ? 'medium'
+              : 'low',
+        message: installed
+          ? `${pkgName}@${installed}: ${(advisory?.title ?? depChain.join(', ')) || pkgName}`
+          : `${pkgName}: ${(advisory?.title ?? depChain.join(', ')) || pkgName}`,
+        detail: detailLines.join('\n'),
+        package: pkgName,
+        version: installed,
+        fixVersion: typeof vuln.fixAvailable === 'object' ? vuln.fixAvailable.version : vuln.fixAvailable ? 'npm audit fix' : undefined,
+        cve: advisory?.cwe?.join(', ') || undefined,
+        advisory: advisory?.url,
+      });
     }
 
     return buildResult('npm-audit', 'npm audit', npmVersion(), issues, Date.now() - start);
