@@ -120,15 +120,46 @@ export function getInstalledPackageVersion(packageName: string, projectPath: str
 
 /**
  * Check if a command-line tool is available via PATH or node_modules/.bin
+ * Supports Windows (uses `where` instead of `which`, handles .cmd/.ps1 extensions).
  */
 export function isBinaryAvailable(name: string, cwd: string): boolean {
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
   try {
-    execSync(`which "${name}"`, { stdio: 'ignore' });
+    execSync(`${cmd} "${name}"`, { stdio: 'ignore' });
     return true;
   } catch {
     // not in PATH — check node_modules/.bin
-    const local = resolve(cwd, 'node_modules', '.bin', name);
-    return existsSync(local);
+    const binDir = resolve(cwd, 'node_modules', '.bin');
+    if (process.platform === 'win32') {
+      return (
+        existsSync(resolve(binDir, `${name}.cmd`)) ||
+        existsSync(resolve(binDir, `${name}.ps1`)) ||
+        existsSync(resolve(binDir, `${name}.exe`)) ||
+        existsSync(resolve(binDir, name))
+      );
+    }
+    return existsSync(resolve(binDir, name));
+  }
+}
+
+/**
+ * Resolve the full path to a binary.
+ * On Windows, node_modules/.bin shims have .cmd / .ps1 extensions that
+ * execFile cannot resolve without the extension or the full path.
+ * On Unix, returns the bare name (shell resolves via PATH).
+ */
+export function resolveBinaryPath(name: string, cwd: string): string {
+  if (process.platform !== 'win32') return name;
+  try {
+    execSync(`where "${name}"`, { stdio: 'ignore' });
+    return name;
+  } catch {
+    const binDir = resolve(cwd, 'node_modules', '.bin');
+    for (const ext of ['.cmd', '.ps1', '.exe', '']) {
+      const full = resolve(binDir, ext ? `${name}${ext}` : name);
+      if (existsSync(full)) return full;
+    }
+    return name;
   }
 }
 
@@ -163,7 +194,9 @@ export function isNpxAvailable(): boolean {
  */
 export function getBinaryVersion(name: string, cwd: string): string {
   try {
-    const out = execSync(`${name} --version`, {
+    const resolved = process.platform === 'win32' ? resolveBinaryPath(name, cwd) : name;
+    // execSync runs via shell; quoted path ensures spaces in path work
+    const out = execSync(`"${resolved}" --version`, {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -190,11 +223,12 @@ export async function runToolCommand(
   args: string[],
   options: ToolOptions,
 ): Promise<CommandResult | null> {
-  debugLog(options.verbose, `exec: ${bin} ${args.join(' ')}`);
+  const resolvedBin = resolveBinaryPath(bin, options.projectPath);
+  debugLog(options.verbose, `exec: ${resolvedBin} ${args.join(' ')}`);
   debugLog(options.verbose, `cwd: ${options.projectPath}`);
 
   try {
-    const { stdout, stderr } = await execFileAsync(bin, args, {
+    const { stdout, stderr } = await execFileAsync(resolvedBin, args, {
       cwd: options.projectPath,
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024, // 10 MB
