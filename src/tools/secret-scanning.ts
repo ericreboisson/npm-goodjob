@@ -23,6 +23,8 @@ interface ScanPattern {
   extensions?: string[];
   /** Minimum confidence to report */
   confidence: 'high' | 'medium';
+  /** If set, reject matches where the text before the match on the same line matches this regex */
+  rejectIfContext?: RegExp;
 }
 
 const PATTERNS: ScanPattern[] = [
@@ -146,6 +148,7 @@ const PATTERNS: ScanPattern[] = [
     severity: 'high',
     regex: /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g,
     confidence: 'medium',
+    rejectIfContext: /(?:^|[\s(["'`])(?:id|uuid|ref|for|class|name)\s*[:=]\s*["']?\s*$/i,
   },
 
   // — Private keys —
@@ -231,7 +234,7 @@ const DEFAULT_SKIP_DIRS = new Set([
   'dist', 'build', '.cache', 'coverage', '.nyc_output',
   '__pycache__', '.tox', 'vendor', '.gradle', 'target',
   'bin', 'obj', '.serverless', '.terraform',
-  '.angular',
+  '.angular', '.idea',
 ]);
 
 const TEXT_EXTENSIONS = new Set([
@@ -314,19 +317,25 @@ function scanFile(filePath: string, patterns: ScanPattern[]): ScanMatch[] {
           const line = (beforeMatch.match(/\n/g) || []).length + 1;
           const lastNewline = beforeMatch.lastIndexOf('\n');
           const column = lastNewline >= 0 ? m.index - lastNewline : m.index;
-          matches.push({ pattern, line, column: column + 1, match: m[0].slice(0, 120) });
+          const ctx = fullContent.slice(Math.max(0, m.index - 80), m.index);
+          if (!pattern.rejectIfContext || !pattern.rejectIfContext.test(ctx)) {
+            matches.push({ pattern, line, column: column + 1, match: m[0].slice(0, 120) });
+          }
         }
       } else {
         // Line-by-line patterns
         for (let i = 0; i < lines.length; i++) {
           pattern.regex.lastIndex = 0;
           while ((m = pattern.regex.exec(lines[i])) !== null) {
-            matches.push({
-              pattern,
-              line: i + 1,
-              column: m.index + 1,
-              match: m[0].slice(0, 120),
-            });
+            const ctx = lines[i].slice(Math.max(0, m.index - 80), m.index);
+            if (!pattern.rejectIfContext || !pattern.rejectIfContext.test(ctx)) {
+              matches.push({
+                pattern,
+                line: i + 1,
+                column: m.index + 1,
+                match: m[0].slice(0, 120),
+              });
+            }
           }
         }
       }
@@ -336,12 +345,15 @@ function scanFile(filePath: string, patterns: ScanPattern[]): ScanMatch[] {
         pattern.regex.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = pattern.regex.exec(lines[i])) !== null) {
-          matches.push({
-            pattern,
-            line: i + 1,
-            column: m.index + 1,
-            match: m[0].slice(0, 120),
-          });
+          const ctx = lines[i].slice(Math.max(0, m.index - 80), m.index);
+          if (!pattern.rejectIfContext || !pattern.rejectIfContext.test(ctx)) {
+            matches.push({
+              pattern,
+              line: i + 1,
+              column: m.index + 1,
+              match: m[0].slice(0, 120),
+            });
+          }
         }
       }
     }
