@@ -18,7 +18,7 @@ npx npm-goodjob . --html-output audit.html
 
 | Capability | Description |
 | --- | --- |
-| **15 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Socket.dev**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
+| **15 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
 | **5 output formats** | Console (colorized), JSON, HTML, **Dashboard HTML**, **Web Dashboard Server** |
 | **Auto-fix** | `--fix` auto-fixes npm audit vulnerabilities, updates outdated deps, fixes package.json issues, dedupes lockfile |
 | **Monorepo support** | Automatic npm/yarn/pnpm workspace detection — audits root + all packages in one command |
@@ -89,7 +89,6 @@ npx npm-goodjob .
 | npm audit | `npm-audit` | Security | `npm` available | `npm audit --json` |
 | npm outdated | `npm-outdated` | Dependencies | `npm` available | `npm outdated --json` |
 | npm audit signatures | `npm-signatures` | Security | `npm` + lockfile | `npm audit signatures --json` |
-| Socket.dev | `socket` | Security | `socket` in PATH or npx | npx @socketsecurity/cli scan --json |
 | depcheck | `depcheck` | Dependencies | `depcheck` in node_modules | npx --yes depcheck |
 | ts-prune | `ts-prune` | Dead code | `ts-prune` in PATH + tsconfig.json | npx ts-prune |
 | ESLint | `eslint` | Code quality | `eslint` in PATH + config file | npx eslint |
@@ -104,7 +103,7 @@ npx npm-goodjob .
 
 > **Zero-config**: tools not installed are silently skipped. Add `--verbose` to see skip reasons.
 >
-> **No results is normal**: many tools report 0 issues on well-maintained projects. dependency-cruiser (no circular deps) and Socket.dev (requires API key) may show "(via npx)" with 0 results if the CLI is not configured — this is expected. Install the CLI + authenticate for full results.
+> **No results is normal**: many tools report 0 issues on well-maintained projects. dependency-cruiser (no circular deps) may show "(via npx)" with 0 results — this is expected.
 
 ---
 
@@ -248,7 +247,7 @@ Composite /20 score calculated from four dimensions (5 points each):
 
 | Dimension | Default weight | Sources |
 |---|---|---|
-| Security | /5 | npm audit, secret-scanning, Socket.dev, npm-signatures |
+| Security | /5 | npm audit, secret-scanning, npm-signatures |
 | Dependencies | /5 | npm outdated, depcheck, lockfile-analysis |
 | Code quality | /5 | ESLint, ts-prune, dependency-cruiser |
 | Project health | /5 | dependency-check, license-check, config validation |
@@ -805,30 +804,29 @@ Your tool is now auto-discovered by `runAudit()` and appears in all output forma
 
 ## Comparison: why npm-goodjob?
 
-| Feature | npm audit | socket.dev | **npm-goodjob** |
+| Feature | npm audit | **npm-goodjob** |
 |---|---|---|---|
-| npm audit | ✓ |  | ✓ |
-| OSA vulnerabilities |  |  | — |
-| Unused dependencies |  |  | ✓ (depcheck) |
-| Dead TypeScript exports |  |  | ✓ (ts-prune) |
-| ESLint integration |  |  | ✓ |
-| Circular dependencies |  |  | ✓ (depcruise) |
-| License compliance |  |  | ✓ |
-| Secret scanning |  | ✓ | ✓ |
-| Lockfile integrity |  |  | ✓ |
-| Health score |  | ✓ | ✓ |
-| Baseline / Diff |  |  | ✓ |
-| Interactive TUI |  |  | ✓ |
-| PR comments |  |  | ✓ |
-| Pre-commit hook |  |  | ✓ |
-| CI templates |  |  | ✓ |
-| Offline / no phone-home | ✓ |  | ✓ |
-| Open source |  |  | ✓ MIT |
-| **Socket.dev integration** |  | ✓ | ✓ |
-| **npm audit signatures** | ✓ |  | ✓ |
-| **Web dashboard server** |  |  | ✓ |
-| **Audit history** |  |  | ✓ |
-| **Single command** | ✓ | ✓ | ✓ (15 tools) |
+| npm audit | ✓ | ✓ |
+| OSA vulnerabilities | — | ✓ |
+| Unused dependencies | | ✓ (depcheck) |
+| Dead TypeScript exports | | ✓ (ts-prune) |
+| ESLint integration | | ✓ |
+| Circular dependencies | | ✓ (depcruise) |
+| License compliance | | ✓ |
+| Secret scanning | | ✓ |
+| Lockfile integrity | | ✓ |
+| Health score | | ✓ |
+| Baseline / Diff | | ✓ |
+| Interactive TUI | | ✓ |
+| PR comments | | ✓ |
+| Pre-commit hook | | ✓ |
+| CI templates | | ✓ |
+| Offline / no phone-home | ✓ | ✓ |
+| Open source | | ✓ MIT |
+| **npm audit signatures** | ✓ | ✓ |
+| **Web dashboard server** | | ✓ |
+| **Audit history** | | ✓ |
+| **Single command** | ✓ | ✓ (14 tools) |
 
 ---
 
@@ -848,7 +846,7 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 - **Node.js >= 20**
 - npm (for audit tools)
-- Optional tools (depcheck, eslint, ts-prune, depcruise, socket) — auto-skipped if missing, fall back to npx when possible
+- Optional tools (depcheck, eslint, ts-prune, depcruise) — auto-skipped if missing, fall back to npx when possible
 
 ---
 
@@ -860,7 +858,6 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 | `npx depcheck` | `npx npm-goodjob . --tools depcheck` |
 | `npx ts-prune` | `npx npm-goodjob . --tools ts-prune` |
 | `npx eslint .` | `npx npm-goodjob . --tools eslint` |
-| `socket.dev scan` | `npx npm-goodjob .` (includes Socket.dev runner) |
 | `npm audit signatures` | `npx npm-goodjob .` (includes npm-signatures runner) |
 | Web dashboard | `npx npm-goodjob serve --open` |
 | All combined | `npx npm-goodjob . --html-output report.html` |

@@ -284,6 +284,8 @@ export interface ToolRunner {
   readonly name: string;
   /** Human-readable label */
   readonly label: string;
+  /** True if this tool is built-in (no external deps, always available) */
+  readonly builtIn?: true;
   /** Quick check if this tool is usable (binary found, config exists, etc.) */
   isAvailable(cwd: string): boolean | Promise<boolean>;
   /** Run the tool and produce a result */

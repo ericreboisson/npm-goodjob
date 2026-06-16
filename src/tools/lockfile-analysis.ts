@@ -163,6 +163,7 @@ async function analyzeLockfile(options: ToolOptions): Promise<ToolResult> {
 export const lockfileAnalysisRunner: ToolRunner = {
   name: 'lockfile-analysis',
   label: 'Lockfile Analysis',
+  builtIn: true,
   isAvailable(_cwd: string): boolean {
     return true; // built-in, always available
   },

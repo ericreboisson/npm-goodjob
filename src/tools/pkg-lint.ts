@@ -371,6 +371,7 @@ function lintCustomConfig(pkg: PkgJson, config: PkgLintConfig | undefined, issue
 export const pkgLintRunner: ToolRunner = {
   name: 'pkg-lint',
   label: 'Package lint',
+  builtIn: true,
 
   isAvailable(cwd: string): boolean {
     return existsSync(resolve(cwd, 'package.json'));

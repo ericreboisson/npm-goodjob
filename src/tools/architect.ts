@@ -257,17 +257,6 @@ function checkTesting(projectPath: string, issues: Issue[]): void {
       message: 'Testing framework found but no "test" script in package.json',
     });
   }
-
-  // Check for coverage config
-  if (!scripts['test:coverage'] && !scripts['test:cov']) {
-    issues.push({
-      level: 'info',
-      tool: 'architect',
-      category: 'configuration',
-      severity: 'low',
-      message: 'No test coverage script — consider adding "test:coverage" script',
-    });
-  }
 }
 
 function checkEnvironment(projectPath: string, issues: Issue[]): void {
@@ -275,15 +264,7 @@ function checkEnvironment(projectPath: string, issues: Issue[]): void {
   const hasDotEnvExample = existsSync(resolve(projectPath, '.env.example'));
   const hasDotEnvLocal = existsSync(resolve(projectPath, '.env.local'));
 
-  if (!hasDotEnv && !hasDotEnvExample) {
-    issues.push({
-      level: 'info',
-      tool: 'architect',
-      category: 'configuration',
-      severity: 'low',
-      message: 'No .env or .env.example file — consider adding environment configuration docs',
-    });
-  } else if (hasDotEnv && !hasDotEnvExample) {
+  if (hasDotEnv && !hasDotEnvExample) {
     issues.push({
       level: 'info',
       tool: 'architect',
@@ -377,16 +358,6 @@ function checkGitConfig(projectPath: string, issues: Issue[]): void {
 }
 
 function checkEditorConfig(projectPath: string, issues: Issue[]): void {
-  if (!existsSync(resolve(projectPath, '.editorconfig'))) {
-    issues.push({
-      level: 'info',
-      tool: 'architect',
-      category: 'configuration',
-      severity: 'low',
-      message: 'Missing .editorconfig — ensures consistent formatting across editors',
-    });
-  }
-
   if (!existsSync(resolve(projectPath, '.nvmrc')) && !existsSync(resolve(projectPath, '.node-version'))) {
     issues.push({
       level: 'info',
@@ -873,6 +844,7 @@ function checkReact(projectPath: string, issues: Issue[]): void {
 export const architectRunner: ToolRunner = {
   name: 'architect',
   label: 'Architecture audit',
+  builtIn: true,
 
   isAvailable(_cwd: string): boolean {
     // Always available — it's a built-in tool that reads existing files

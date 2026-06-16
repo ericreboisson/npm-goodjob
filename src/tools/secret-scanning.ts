@@ -495,6 +495,7 @@ async function runSecretScan(options: ToolOptions): Promise<ToolResult> {
 export const secretScanningRunner: ToolRunner = {
   name: 'secret-scanning',
   label: 'Secret Scanning',
+  builtIn: true,
   isAvailable(_cwd: string): boolean {
     return true; // built-in, always available
   },

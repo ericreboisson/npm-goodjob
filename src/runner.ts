@@ -81,7 +81,7 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
   const tools = getAllTools();
   const configDisabled = new Set(config.tools?.disabled ?? []);
 
-  const filtered = tools.filter((t) => {
+  let filtered = tools.filter((t) => {
     // Config disabled takes precedence
     if (configDisabled.has(t.name)) return false;
     if (opts.tools && opts.tools.length > 0) {
@@ -95,15 +95,7 @@ export async function runAudit(overrides: RunOptions = {}): Promise<AuditReport>
 
   // Fast mode: only built-in tools (no npx/external dependencies)
   if (overrides.fast) {
-    const builtIn = new Set([
-      'architect', 'secret-scanning', 'lockfile-analysis',
-      'dependency-check', 'license-check', 'pkg-lint',
-    ]);
-    const fastFiltered = filtered.filter(t => builtIn.has(t.name));
-    if (fastFiltered.length > 0) {
-      filtered.length = 0;
-      filtered.push(...fastFiltered);
-    }
+    filtered = filtered.filter(t => t.builtIn);
   }
 
   // Check cache

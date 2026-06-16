@@ -171,6 +171,7 @@ async function runLicenseChecker(options: ToolOptions): Promise<ToolResult> {
 export const licenseCheckRunner: ToolRunner = {
   name: 'license-check',
   label: 'License Check',
+  builtIn: true,
   isAvailable(_cwd: string): boolean {
     // license-checker always works via npx, no local install needed
     return isNpxAvailable();

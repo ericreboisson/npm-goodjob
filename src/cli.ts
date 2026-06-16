@@ -286,8 +286,6 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
 
   const allDeps = { ...deps, ...devDeps };
   const hasTypescript = !!allDeps['typescript'];
-  const hasEslint = !!allDeps['eslint'];
-  const hasDepcheck = !!allDeps['depcheck'];
 
   // Build .goodjobrc content
   const config: Record<string, unknown> = {
@@ -367,24 +365,12 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
   console.error(`\n  ${BOLD}Summary${RESET}`);
   console.error(`  ${DIM}Project type:${RESET} ${framework}${hasTypescript ? ' + TypeScript' : ''}`);
   console.error(`  ${DIM}Tools${RESET}`);
-  const allTools = [
-    { name: 'npm-audit', ok: true },
-    { name: 'npm-outdated', ok: true },
-    { name: 'npm-signatures', ok: true },
-    { name: 'secret-scanning', ok: true },
-    { name: 'lockfile-analysis', ok: true },
-    { name: 'license-check', ok: true },
-    { name: 'dependency-check', ok: true },
-    { name: 'depcheck', ok: hasDepcheck },
-    { name: 'eslint', ok: hasEslint },
-    { name: 'ts-prune', ok: hasTypescript },
-    { name: 'depcruise', ok: hasDepcheck },
-    { name: 'socket', ok: false },
-  ];
+  const allTools = getAllTools();
   for (const t of allTools) {
-    const icon = t.ok ? `${FG_GREEN}✓${RESET}` : `${DIM}–${RESET}`;
-    const note = t.ok ? '' : ` ${DIM}(not installed, runs via npx if available)${RESET}`;
-    console.error(`    ${icon} ${t.name}${note}`);
+    const ok = t.isAvailable(projectPath);
+    const icon = ok ? `${FG_GREEN}✓${RESET}` : `${DIM}–${RESET}`;
+    const note = ok ? '' : ` ${DIM}(not installed, runs via npx if available)${RESET}`;
+    console.error(`    ${icon} ${t.label}${note}`);
   }
 
   console.error(`\n  ${FG_GREEN}${BOLD}  npm-goodjob init complete${RESET}`);

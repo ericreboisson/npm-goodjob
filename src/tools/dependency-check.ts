@@ -20,6 +20,7 @@ import {
 export const dependencySanityRunner: ToolRunner = {
   name: 'dependency-check',
   label: 'Dependency sanity',
+  builtIn: true,
 
   isAvailable(cwd: string): boolean {
     return existsSync(resolve(cwd, 'package.json'));
