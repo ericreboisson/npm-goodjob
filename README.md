@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c)](https://github.com/ericreboisson/npm-goodjob/network/updates)
 
-**Unified npm project audit aggregator** — run 17 audit tools with one command, get one report with health score, policy enforcement, SBOM, SARIF, baseline diff, web dashboard, and interactive TUI.
+**Unified npm project audit aggregator** — run 17 audit tools with one command, get one report with health score, policy enforcement, baseline diff, web dashboard, and interactive TUI.
 
 ```bash
 npx npm-goodjob . --html-output audit.html
@@ -18,8 +18,8 @@ npx npm-goodjob . --html-output audit.html
 
 | Capability | Description |
 | --- | --- |
-| **17 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Snyk**, **Socket.dev**, **AuditJS**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
-| **6 output formats** | Console (colorized), JSON, HTML, SARIF 2.1.0, **Dashboard HTML**, **Web Dashboard Server** |
+| **15 built-in tools** | npm-audit, npm-outdated, depcheck, ts-prune, ESLint, dependency-cruiser, dependency-check, license-check, lockfile-analysis, secret-scanning, **Socket.dev**, **npm-signatures**, **pkg-lint**, **architect**, **knip** |
+| **5 output formats** | Console (colorized), JSON, HTML, **Dashboard HTML**, **Web Dashboard Server** |
 | **Auto-fix** | `--fix` auto-fixes npm audit vulnerabilities, updates outdated deps, fixes package.json issues, dedupes lockfile |
 | **Monorepo support** | Automatic npm/yarn/pnpm workspace detection — audits root + all packages in one command |
 | **Dependency drift** | Built-in lockfile analysis detects mismatches between package.json and package-lock.json |
@@ -28,7 +28,6 @@ npx npm-goodjob . --html-output audit.html
 | **Health score** | /20 composite score: security, dependencies, code quality, project health |
 | **Severity-weighted score** | Penalty model (critical=-3, high=-2, medium=-1, low=-0.5) with `--strict` enforcement |
 | **Policy as Code** | Expression-based rules (`severity.critical > 0`) with error/warning levels |
-| **SBOM (SPDX 2.3)** | Software Bill of Materials with PURLs, licenses — CRA compliant |
 | **Baseline + Diff** | Store a snapshot, diff against future runs, detect regressions and new CVEs |
 | **Trend tracking** | Auto-saved run history in `.goodjob-data/history/`, `baseline trend` for health evolution |
 | **Team dashboard** | Per-developer git blame, top flops ranking, regressions view in HTML dashboard |
@@ -38,7 +37,7 @@ npx npm-goodjob . --html-output audit.html
 | **Pre-commit hook** | Fast checks (secret-scanning + lockfile-analysis) before every commit |
 | **PR/MR comments** | Auto-post health summary to GitHub/GitLab PRs |
 | **Framework detection** | Auto-detects Angular, React, Node.js projects |
-| **CI templates** | GitHub Actions + GitLab CI with SARIF upload and baseline |
+| **CI templates** | GitHub Actions + GitLab CI with baseline |
 | **Zero-effort skip** | Gracefully skips uninstalled tools — no config needed |
 | **Extensible** | `registerTool()` API for custom runners |
 
@@ -55,12 +54,6 @@ npx npm-goodjob . --html-output audit.html
 
 # Output JSON
 npx npm-goodjob . --json
-
-# Generate SARIF for GitHub Code Scanning
-npx npm-goodjob . --sarif-output results.sarif
-
-# Generate SPDX SBOM
-npx npm-goodjob . --sbom-output sbom.json
 ```
 
 ---
@@ -96,9 +89,7 @@ npx npm-goodjob .
 | npm audit | `npm-audit` | Security | `npm` available | `npm audit --json` |
 | npm outdated | `npm-outdated` | Dependencies | `npm` available | `npm outdated --json` |
 | npm audit signatures | `npm-signatures` | Security | `npm` + lockfile | `npm audit signatures --json` |
-| Snyk | `snyk` | Security | `snyk` in PATH or npx | `snyk test --json` |
 | Socket.dev | `socket` | Security | `socket` in PATH or npx | npx @socketsecurity/cli scan --json |
-| AuditJS | `auditjs` | Security | `auditjs` in PATH or npx | `auditjs ossi --json` |
 | depcheck | `depcheck` | Dependencies | `depcheck` in node_modules | npx --yes depcheck |
 | ts-prune | `ts-prune` | Dead code | `ts-prune` in PATH + tsconfig.json | npx ts-prune |
 | ESLint | `eslint` | Code quality | `eslint` in PATH + config file | npx eslint |
@@ -113,7 +104,7 @@ npx npm-goodjob .
 
 > **Zero-config**: tools not installed are silently skipped. Add `--verbose` to see skip reasons.
 >
-> **No results is normal**: many tools report 0 issues on well-maintained projects. dependency-cruiser (no circular deps), Socket.dev (requires API key), and AuditJS (requires OSS Index account) may show "(via npx)" with 0 results if the CLI is not configured — this is expected. Install the CLI + authenticate for full results.
+> **No results is normal**: many tools report 0 issues on well-maintained projects. dependency-cruiser (no circular deps) and Socket.dev (requires API key) may show "(via npx)" with 0 results if the CLI is not configured — this is expected. Install the CLI + authenticate for full results.
 
 ---
 
@@ -130,10 +121,6 @@ npx npm-goodjob .
 | `-o, --output <file>` | Write JSON report to file |
 | `--html` | Output HTML to stdout |
 | `--html-output <file>` | Write HTML report to file |
-| `--sarif` | Output SARIF 2.1.0 to stdout |
-| `--sarif-output <file>` | Write SARIF to file (GitHub Code Scanning / GitLab SAST) |
-| `--sbom` | Output SPDX 2.3 SBOM to stdout |
-| `--sbom-output <file>` | Write SPDX 2.3 SBOM to file |
 | `-v, --verbose` | Show raw tool output and skip reasons |
 | `--fix` | Auto-fix fixable issues (npm audit fix, npm update, package.json fixes, lockfile dedupe) |
 | `--timeout <ms>` | Per-tool timeout (default: 120000) |
@@ -249,14 +236,6 @@ npx npm-goodjob . --json | jq '.summary'
 
 Standalone HTML report with health circle chart, **SVG donut chart** (severity breakdown), **SVG bar chart** (category breakdown), severity-weighted score, and per-tool expandable issue lists. Generated via `--html-output`.
 
-### SARIF 2.1.0
-
-Standard format for GitHub Code Scanning and GitLab SAST. CVEs mapped to SARIF `relatedLocations` with fingerprints.
-
-```bash
-npx npm-goodjob . --sarif-output results.sarif
-```
-
 ---
 
 ## Health score
@@ -269,7 +248,7 @@ Composite /20 score calculated from four dimensions (5 points each):
 
 | Dimension | Default weight | Sources |
 |---|---|---|
-| Security | /5 | npm audit, secret-scanning, Snyk, Socket.dev, AuditJS, npm-signatures |
+| Security | /5 | npm audit, secret-scanning, Socket.dev, npm-signatures |
 | Dependencies | /5 | npm outdated, depcheck, lockfile-analysis |
 | Code quality | /5 | ESLint, ts-prune, dependency-cruiser |
 | Project health | /5 | dependency-check, license-check, config validation |
@@ -355,22 +334,6 @@ Define rules that fail (exit 1) or warn when conditions are breached. Rules use 
 Policy violations appear as a `policy` meta-tool in reports, affecting exit code and summary counts.
 
 ---
-
-## SBOM (SPDX 2.3)
-
-Generate a Software Bill of Materials compliant with EU Cyber Resilience Act and US Executive Order 14028:
-
-```bash
-npx npm-goodjob . --sbom-output sbom.json
-```
-
-Output is SPDX 2.3 JSON with:
-- Package names, versions, suppliers
-- PURL package URLs
-- License info from `license-check`
-- `SPDXRef-Package` relationships
-- Relationship to the root package
-- `creationInfo` with tool name and timestamp
 
 ---
 
@@ -595,15 +558,11 @@ jobs:
       - name: Store baseline
         continue-on-error: true
         run: npx npm-goodjob baseline store --file baseline.json
-      - name: Run audit with SARIF
-        run: npx npm-goodjob --sarif-output results.sarif
+      - name: Run npm-goodjob audit
+        run: npx npm-goodjob . --html-output report.html
       - name: Compare with baseline
         if: success()
         run: npx npm-goodjob baseline diff --file baseline.json
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
 ```
 
 ### GitLab CI
@@ -613,10 +572,7 @@ goodjob-audit:
   stage: test
   script:
     - npm ci
-    - npx npm-goodjob --sarif-output results.sarif
-  artifacts:
-    reports:
-      sast: results.sarif
+    - npx npm-goodjob . --html-output report.html
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 ```
@@ -737,10 +693,8 @@ import {
   consoleReporter,
   jsonReporter,
   htmlReporter,
-  sarifReporter,
   writeJsonFile,
   writeHtmlFile,
-  writeSarifFile,
 } from 'npm-goodjob';
 
 // Run full audit
@@ -762,7 +716,6 @@ console.log(report.tools['npm-audit']); // ToolResult with issues[]
 // Generate output
 consoleReporter.write(report);       // colorized terminal
 await writeHtmlFile(report, 'audit.html');
-writeSarifFile(report, 'results.sarif');
 
 // Config
 const config = loadConfig('./my-project');
@@ -852,35 +805,30 @@ Your tool is now auto-discovered by `runAudit()` and appears in all output forma
 
 ## Comparison: why npm-goodjob?
 
-| Feature | npm audit | snyk | socket.dev | **npm-goodjob** |
-|---|---|---|---|---|
-| npm audit | ✓ | | | ✓ |
-| OSA vulnerabilities | | ✓ | | — |
-| Unused dependencies | | | | ✓ (depcheck) |
-| Dead TypeScript exports | | | | ✓ (ts-prune) |
-| ESLint integration | | | | ✓ |
-| Circular dependencies | | | | ✓ (depcruise) |
-| License compliance | | | | ✓ |
-| Secret scanning | | | ✓ | ✓ |
-| Lockfile integrity | | | | ✓ |
-| Health score | | ✓ | ✓ | ✓ |
-| Policy as Code | | | ✓ | ✓ |
-| SARIF output | | | | ✓ |
-| SBOM (SPDX 2.3) | | | | ✓ |
-| Baseline / Diff | | | | ✓ |
-| Interactive TUI | | | | ✓ |
-| PR comments | | | | ✓ |
-| Pre-commit hook | | | | ✓ |
-| CI templates | | | | ✓ |
-| Offline / no phone-home | ✓ | | | ✓ |
-| Open source | | | | ✓ MIT |
-| **Snyk integration** | | ✓ | | ✓ |
-| **Socket.dev integration** | | | ✓ | ✓ |
-| **AuditJS / OSS Index** | | | | ✓ |
-| **npm audit signatures** | ✓ | | | ✓ |
-| **Web dashboard server** | | | | ✓ |
-| **Audit history** | | | | ✓ |
-| **Single command** | ✓ | ✓ | ✓ | ✓ (17 tools) |
+| Feature | npm audit | socket.dev | **npm-goodjob** |
+|---|---|---|---|
+| npm audit | ✓ |  | ✓ |
+| OSA vulnerabilities |  |  | — |
+| Unused dependencies |  |  | ✓ (depcheck) |
+| Dead TypeScript exports |  |  | ✓ (ts-prune) |
+| ESLint integration |  |  | ✓ |
+| Circular dependencies |  |  | ✓ (depcruise) |
+| License compliance |  |  | ✓ |
+| Secret scanning |  | ✓ | ✓ |
+| Lockfile integrity |  |  | ✓ |
+| Health score |  | ✓ | ✓ |
+| Baseline / Diff |  |  | ✓ |
+| Interactive TUI |  |  | ✓ |
+| PR comments |  |  | ✓ |
+| Pre-commit hook |  |  | ✓ |
+| CI templates |  |  | ✓ |
+| Offline / no phone-home | ✓ |  | ✓ |
+| Open source |  |  | ✓ MIT |
+| **Socket.dev integration** |  | ✓ | ✓ |
+| **npm audit signatures** | ✓ |  | ✓ |
+| **Web dashboard server** |  |  | ✓ |
+| **Audit history** |  |  | ✓ |
+| **Single command** | ✓ | ✓ | ✓ (15 tools) |
 
 ---
 
@@ -900,7 +848,7 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 
 - **Node.js >= 20**
 - npm (for audit tools)
-- Optional tools (depcheck, eslint, ts-prune, depcruise, snyk, socket, auditjs) — auto-skipped if missing, fall back to npx when possible
+- Optional tools (depcheck, eslint, ts-prune, depcruise, socket) — auto-skipped if missing, fall back to npx when possible
 
 ---
 
@@ -912,12 +860,10 @@ npm-goodjob auto-detects your framework and adjusts tool defaults:
 | `npx depcheck` | `npx npm-goodjob . --tools depcheck` |
 | `npx ts-prune` | `npx npm-goodjob . --tools ts-prune` |
 | `npx eslint .` | `npx npm-goodjob . --tools eslint` |
-| `snyk test` | `npx npm-goodjob .` (includes Snyk runner) |
 | `socket.dev scan` | `npx npm-goodjob .` (includes Socket.dev runner) |
-| `auditjs ossi` | `npx npm-goodjob .` (includes AuditJS runner) |
 | `npm audit signatures` | `npx npm-goodjob .` (includes npm-signatures runner) |
 | Web dashboard | `npx npm-goodjob serve --open` |
-| All combined | `npx npm-goodjob . --html-output report.html --sarif --sbom` |
+| All combined | `npx npm-goodjob . --html-output report.html` |
 
 ---
 
