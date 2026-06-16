@@ -55,7 +55,7 @@ export function writeDashboardConsole(report: DashboardReport): void {
   for (const entry of sorted) {
     const name = entry.name.padEnd(nameWidth);
     const healthStr = formatHealthShort(entry);
-    const issuesStr = entry.report ? String(entry.report.summary.total).padStart(4) : '  —';
+    const issuesStr = entry.report ? String(entry.report.summary.total).padStart(5) : '   —';
     const statusStr = formatStatus(entry);
     console.log(`  ${sep} ${BOLD}${name}${RESET} ${sep} ${healthStr} ${sep} ${issuesStr}  ${sep} ${statusStr} ${sep}`);
   }
@@ -88,9 +88,9 @@ function formatStatus(entry: DashboardProjectEntry): string {
   }
   const errors = entry.report?.summary.errors ?? 0;
   if (errors > 0) {
-    return `${FG_YELLOW}${BOLD}⚠ ${errors} err ${RESET}`;
+    return `${FG_YELLOW}${BOLD}⚠ ${errors} err${' '.repeat(errors < 10 ? 1 : 0)} ${RESET}`;
   }
-  return `${FG_GREEN}${BOLD}✓ OK    ${RESET}`;
+  return `${FG_GREEN}${BOLD}✓ OK      ${RESET}`;
 }
 
 function formatDuration(ms: number): string {

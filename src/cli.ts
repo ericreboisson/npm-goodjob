@@ -4,7 +4,7 @@
 
 import { execSync } from 'node:child_process';
 import { Command } from 'commander';
-import { existsSync, writeFileSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, chmodSync, rmSync, writeSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { getAllTools } from './tools/base.js';
@@ -16,9 +16,7 @@ import { isGitUrl, cloneRepoAsync } from './git-clone.js';
 import { consoleReporter } from './reporters/console-reporter.js';
 import { jsonReporter, writeJsonFile } from './reporters/json-reporter.js';
 import { htmlReporter, writeHtmlFile } from './reporters/html-reporter.js';
-import { sarifReporter, writeSarifFile } from './reporters/sarif-reporter.js';
 import { storeBaseline, loadBaseline, computeDiff, formatDiff, baselineSummary, saveRunToHistory, loadRunHistory, computeTrend } from './baseline.js';
-import { formatSbomOutput } from './sbom.js';
 import { postPrComment, formatPrComment } from './pr-comment.js';
 import { runTui } from './tui.js';
 import { runFix, formatFixOutput } from './fix.js';
@@ -44,8 +42,40 @@ class ProgressTracker {
   private failed = 0;
   private startTime = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private preTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly useAnsi = process.stderr.isTTY;
+  private started = false;
+
+  constructor() {
+    if (this.useAnsi) {
+      this.renderPre();
+      this.preTimer = setInterval(() => this.renderPre(), 150);
+    }
+  }
+
+  /** Write directly to stderr fd, bypassing Node.js stream buffering */
+  private write(msg: string): void {
+    try {
+      writeSync(process.stderr.fd, msg);
+    } catch {
+      process.stderr.write(msg);
+    }
+  }
+
+  private renderPre(): void {
+    const spinner = '-\\|/'[Math.floor(Date.now() / 120) % 4];
+    const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(1);
+    this.write(`\r  ${spinner} Starting audit... ${elapsed}s\x1b[K`);
+  }
 
   start(name: string, label: string): void {
+    if (!this.started) {
+      this.started = true;
+      if (this.preTimer) {
+        clearInterval(this.preTimer);
+        this.preTimer = null;
+      }
+    }
     this.running.set(name, { label, startMs: Date.now() });
     this.scheduleRender();
   }
@@ -57,7 +87,7 @@ class ProgressTracker {
     else this.failed++;
 
     // Clear progress line, print completion line
-    this.clearLine();
+    if (this.useAnsi) this.clearLine();
     const elapsed = durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
     const tag = status === 'success'
       ? `${FG_GREEN}✓${RESET}`
@@ -65,7 +95,7 @@ class ProgressTracker {
         ? `${DIM}–${RESET}`
         : `${FG_RED}✗${RESET}`;
     const countInfo = issues > 0 ? ` ${FG_YELLOW}(${issues})${RESET}` : '';
-    process.stderr.write(`  ${tag} ${BOLD}${label}${RESET} ${DIM}${elapsed}${RESET}${countInfo}\n`);
+    this.write(`  ${tag} ${BOLD}${label}${RESET} ${DIM}${elapsed}${RESET}${countInfo}\n`);
 
     if (this.running.size === 0) {
       this.stop();
@@ -75,7 +105,7 @@ class ProgressTracker {
   }
 
   private scheduleRender(): void {
-    if (this.timer) return;
+    if (!this.useAnsi || this.timer) return;
     this.timer = setInterval(() => this.render(), 150);
     if (typeof this.timer === 'object' && this.timer && 'unref' in this.timer) {
       (this.timer as NodeJS.Timeout).unref();
@@ -86,7 +116,9 @@ class ProgressTracker {
     const elapsed = ((Date.now() - this.startTime) / 1000).toFixed(1);
     const done = this.completed + this.skipped + this.failed;
     const total = done + this.running.size;
-    const spinner = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(Date.now() / 80) % 10];
+    // PowerShell / cmd.exe compatible spinner: `-` toggles on every frame so
+    // the line visibly changes even when the Braille dot characters don't render.
+    const spinner = '-\\|/'[Math.floor(Date.now() / 120) % 4];
 
     // Show running tool labels inline (max 2)
     const runningLabels = [...this.running.values()].map((r) => {
@@ -97,19 +129,25 @@ class ProgressTracker {
       ? runningLabels.join(', ')
       : `${runningLabels[0]}, ${runningLabels[1]} +${runningLabels.length - 2} more`;
 
-    process.stderr.write(`\r\x1b[K  ${spinner} ${done}/${total} · ${elapsed}s  ${DIM}${runningStr}${RESET}`);
+    // `\r` resets cursor to column 0; pad with spaces to clear previous content.
+    const line = `  ${spinner} ${done}/${total} · ${elapsed}s  ${runningStr}`;
+    this.write(`\r${line}\x1b[K`);
   }
 
   private stop(): void {
+    if (this.preTimer) {
+      clearInterval(this.preTimer);
+      this.preTimer = null;
+    }
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.clearLine();
+    if (this.useAnsi) this.clearLine();
   }
 
   private clearLine(): void {
-    process.stderr.write('\r\x1b[K');
+    this.write('\r\x1b[K');
   }
 }
 
@@ -201,25 +239,18 @@ jobs:
         id: baseline
         continue-on-error: true
         run: npx npm-goodjob baseline store --file goodjob-baseline.json
-      - name: Run npm-goodjob audit with SARIF
-        run: npx npm-goodjob --sarif-output goodjob-results.sarif
+      - name: Run npm-goodjob audit
+        run: npx npm-goodjob . --html-output goodjob-report.html
       - name: Compare with baseline
         if: steps.baseline.outcome == 'success'
         run: npx npm-goodjob baseline diff --file goodjob-baseline.json
-      - name: Upload SARIF to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: goodjob-results.sarif
 `;
 
 const GITLAB_CI_TEMPLATE = `goodjob-audit:
   stage: test
   script:
     - npm ci
-    - npx npm-goodjob --sarif-output goodjob-results.sarif
-  artifacts:
-    reports:
-      sast: goodjob-results.sarif
+    - npx npm-goodjob . --html-output goodjob-report.html
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 `;
@@ -348,9 +379,7 @@ async function runInit(projectPath: string, options: { ci?: boolean }): Promise<
     { name: 'eslint', ok: hasEslint },
     { name: 'ts-prune', ok: hasTypescript },
     { name: 'depcruise', ok: hasDepcheck },
-    { name: 'snyk', ok: false },
     { name: 'socket', ok: false },
-    { name: 'auditjs', ok: false },
   ];
   for (const t of allTools) {
     const icon = t.ok ? `${FG_GREEN}✓${RESET}` : `${DIM}–${RESET}`;
@@ -774,10 +803,6 @@ export async function runCLI(): Promise<void> {
     .option('-o, --output <file>', 'Write JSON report to a file')
     .option('--html', 'Output HTML report')
     .option('--html-output <file>', 'Write HTML report to a file')
-    .option('--sarif', 'Output SARIF report (GitHub Code Scanning / GitLab SAST)')
-    .option('--sarif-output <file>', 'Write SARIF report to a file')
-    .option('--sbom', 'Output SPDX 2.3 SBOM (Bill of Materials)')
-    .option('--sbom-output <file>', 'Write SPDX 2.3 SBOM to a file')
     .option('-v, --verbose', 'Include raw tool output in report')
     .option('--no-cache', 'Disable result caching (slower but always fresh)')
     .option('--fix', 'Auto-fix fixable issues (npm audit fix, npm update outdated)')
@@ -816,21 +841,8 @@ export async function runCLI(): Promise<void> {
       // Route output format
       const jsonOutputFile = opts.output as string | undefined;
       const htmlOutputFile = opts.htmlOutput as string | undefined;
-      const sarifOutputFile = opts.sarifOutput as string | undefined;
-      const sbomOutputFile = opts.sbomOutput as string | undefined;
 
-      if (sbomOutputFile) {
-        const sbomJson = formatSbomOutput(resolvedPath, report);
-        writeFileSync(resolve(process.cwd(), sbomOutputFile), sbomJson, 'utf-8');
-        console.error(`\n\u{1F4CB} SBOM written to: ${sbomOutputFile}\n`);
-      } else if (opts.sbom) {
-        process.stdout.write(formatSbomOutput(resolvedPath, report) + '\n');
-      } else if (sarifOutputFile) {
-        writeSarifFile(report, resolve(process.cwd(), sarifOutputFile));
-        console.error(`\n🔬 SARIF report written to: ${sarifOutputFile}\n`);
-      } else if (opts.sarif) {
-        sarifReporter.write(report);
-      } else if (htmlOutputFile) {
+      if (htmlOutputFile) {
         await writeHtmlFile(report, resolve(process.cwd(), htmlOutputFile));
         console.error(`\n📄 HTML report written to: ${htmlOutputFile}\n`);
       } else if (opts.html) {
